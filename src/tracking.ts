@@ -6,7 +6,7 @@ import {
   localDate, markInterrupted, openDay, openLeg, pointsForLeg, setAddress,
   type Day, type Leg,
 } from './db';
-import { haversineMeters, legMeters, metersToMiles, type Fix } from './geo';
+import { haversineMeters, legMeters, metersToMiles, trackPoints, type Fix } from './geo';
 
 export const TASK = 'mileage-tracking';
 
@@ -144,7 +144,8 @@ export async function startDay(): Promise<PermResult> {
 const GAP_MS = 2 * 60 * 1000;
 const GAP_M = 500;
 
-export function findGap(pts: Fix[]): { from: number; to: number } | null {
+export function findGap(raw: Fix[]): { from: number; to: number } | null {
+  const pts = trackPoints(raw); // a lone glitch isn't a hole in the recording
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1], b = pts[i];
     if (b.ts - a.ts > GAP_MS && haversineMeters(a, b) > GAP_M) return { from: a.ts, to: b.ts };

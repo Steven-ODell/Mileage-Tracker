@@ -13,6 +13,12 @@
   .pin { font: 700 13px sans-serif; color: #fff; border: 2px solid #fff; border-radius: 14px;
     min-width: 24px; height: 24px; line-height: 24px; text-align: center; padding: 0 4px;
     box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+  #trim { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: none; background: #fff;
+    padding: 12px 14px 16px; box-shadow: 0 -2px 8px rgba(0,0,0,.2); font: 15px sans-serif; }
+  #trim .row { display: flex; align-items: center; gap: 10px; }
+  #trim input { flex: 1; height: 36px; accent-color: #c62828; }
+  #trim button { font: 700 20px sans-serif; width: 48px; height: 44px; border-radius: 10px; border: 2px solid #999; background: #fff; }
+  #trim .hint { color: #555; margin-bottom: 6px; }
   .now { width: 16px; height: 16px; border-radius: 50%; background: #1565c0; border: 3px solid #fff;
     box-shadow: 0 0 0 6px rgba(21,101,192,.25); }
 </style>
@@ -21,15 +27,20 @@
 <div id="map"></div>
 <div id="note"></div>
 <button id="fit">Fit route</button>
+<div id="trim">
+  <div class="hint">Drag left to rewind the end of this leg to where you really stopped.</div>
+  <div class="row"><button id="back1">&#9664;</button><input id="slider" type="range" min="0" value="0"><button id="fwd1">&#9654;</button></div>
+</div>
 <script>/*MAPLIBRE_JS*/</script>
 <script>
 // Data arrives from React Native via window.setData(payload):
-// { legs: [{ no, color, open, points: [[lng,lat]...], dropped: [[lng,lat]...] }],
+// { legs: [{ no, open, points: [[lng,lat]...], cut: [[lng,lat]...], dropped: [[lng,lat]...] }],
 //   pins: [{ lng, lat, label, color }], now: [lng,lat] | null }
 var COLORS = ['#1b7f3b', '#1565c0', '#c62828', '#6a1b9a', '#ef6c00'];
 var STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 var BLANK = { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#eef0ea' } }] };
-var map, ready = false, pending = null, last = null, fitted = false, markers = [];
+var map, ready = false, pending = null, last = null, fitted = false, markers = [], endMarker = null;
+var trimPts = null; // full track of the leg while trimming
 
 function note(t) { var n = document.getElementById('note'); n.textContent = t; n.style.display = t ? 'block' : 'none'; }
 
@@ -39,6 +50,9 @@ function start(style) {
   map.on('load', function () {
     map.addSource('route', { type: 'geojson', data: empty() });
     map.addSource('dropped', { type: 'geojson', data: empty() });
+    map.addSource('cut', { type: 'geojson', data: empty() });
+    map.addLayer({ id: 'cut', type: 'line', source: 'cut', layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#888', 'line-width': 4, 'line-dasharray': [1, 1.5] } });
     map.addLayer({ id: 'casing', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: { 'line-color': '#fff', 'line-width': 8 } });
     map.addLayer({ id: 'line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' },
@@ -54,21 +68,25 @@ function empty() { return { type: 'FeatureCollection', features: [] }; }
 
 function render(d) {
   last = d;
-  var lines = [], drops = [], all = [];
+  var lines = [], drops = [], cuts = [], all = [];
   d.legs.forEach(function (l, i) {
     var color = COLORS[i % COLORS.length];
     if (l.points.length > 1) lines.push({ type: 'Feature', properties: { color: color }, geometry: { type: 'LineString', coordinates: l.points } });
+    if (l.cut && l.cut.length > 1) cuts.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: l.cut } });
     l.dropped.forEach(function (p) { drops.push({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: p } }); });
     all = all.concat(l.points);
   });
   map.getSource('route').setData({ type: 'FeatureCollection', features: lines });
   map.getSource('dropped').setData({ type: 'FeatureCollection', features: drops });
+  map.getSource('cut').setData({ type: 'FeatureCollection', features: cuts });
   markers.forEach(function (m) { m.remove(); });
   markers = [];
   d.pins.forEach(function (p) {
     var el = document.createElement('div');
     el.className = 'pin'; el.style.background = p.color; el.textContent = p.label;
-    markers.push(new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map));
+    var m = new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map);
+    if (p.label === 'To') endMarker = m;
+    markers.push(m);
     all.push([p.lng, p.lat]);
   });
   if (d.now) {
@@ -94,6 +112,41 @@ document.getElementById('fit').onclick = function () {
 };
 
 window.setData = function (d) { if (ready) render(d); else pending = d; };
+
+// Trim mode: the slider picks which recorded point becomes the leg's new end.
+// Only the index goes back to React Native, which recomputes the miles.
+function showCut(i) {
+  var kept = trimPts.slice(0, i + 1), cut = trimPts.slice(i);
+  map.getSource('route').setData({ type: 'FeatureCollection', features: kept.length > 1 ? [
+    { type: 'Feature', properties: { color: '#1b7f3b' }, geometry: { type: 'LineString', coordinates: kept } }] : [] });
+  map.getSource('cut').setData({ type: 'FeatureCollection', features: cut.length > 1 ? [
+    { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: cut } }] : [] });
+  if (endMarker) endMarker.setLngLat(trimPts[i]);
+  if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'trim', i: i }));
+}
+var slider = document.getElementById('slider');
+slider.oninput = function () { showCut(+slider.value); };
+function step(n) {
+  slider.value = Math.max(+slider.min, Math.min(+slider.max, +slider.value + n));
+  showCut(+slider.value);
+}
+document.getElementById('back1').onclick = function () { step(-1); };
+document.getElementById('fwd1').onclick = function () { step(1); };
+
+window.startTrim = function (full, i) {
+  trimPts = full;
+  slider.max = full.length - 1;
+  slider.value = i;
+  document.getElementById('trim').style.display = 'block';
+  document.getElementById('fit').style.bottom = '150px';
+  if (ready) showCut(i);
+};
+window.stopTrim = function () {
+  trimPts = null;
+  document.getElementById('trim').style.display = 'none';
+  document.getElementById('fit').style.bottom = '34px';
+  if (last) render(last);
+};
 
 // No signal means no basemap. Fall back to a blank background so the route
 // itself still draws.

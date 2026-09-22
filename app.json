@@ -5,8 +5,10 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "platforms": ["android"],
+    "userInterfaceStyle": "automatic",
+    "platforms": [
+      "android"
+    ],
     "android": {
       "package": "com.sao.mileagelog",
       "adaptiveIcon": {
@@ -41,7 +43,10 @@
         "expo-build-properties",
         {
           "android": {
-            "buildArchs": ["arm64-v8a", "x86_64"]
+            "buildArchs": [
+              "arm64-v8a",
+              "x86_64"
+            ]
           }
         }
       ]

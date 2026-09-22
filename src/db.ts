@@ -52,6 +52,44 @@ function migrate(d: SQLite.SQLiteDatabase) {
       PRAGMA user_version = 1;
     `);
   }
+  if (v < 2) {
+    // v2: start_time becomes optional (manual legs have no times) and legs
+    // gain trim columns. SQLite can't drop NOT NULL in place, so rebuild the
+    // table. Foreign keys must be off while the old table is dropped, and that
+    // pragma is ignored inside a transaction.
+    d.execSync('PRAGMA foreign_keys = OFF;');
+    d.withTransactionSync(() => {
+      d.execSync(`
+        CREATE TABLE legs_v2 (
+          id INTEGER PRIMARY KEY,
+          day_id INTEGER REFERENCES days(id),
+          date TEXT NOT NULL,
+          leg_no INTEGER NOT NULL,
+          start_time INTEGER,              -- null for manual legs
+          end_time INTEGER,                -- null while the leg is being driven
+          from_lat REAL, from_lng REAL, from_address TEXT,
+          to_lat REAL, to_lng REAL, to_address TEXT,
+          miles REAL,
+          purpose TEXT,
+          note TEXT,
+          source TEXT NOT NULL DEFAULT 'gps',
+          interrupted INTEGER NOT NULL DEFAULT 0,
+          trim_end_ts INTEGER,             -- points after this are ignored
+          orig_end_time INTEGER            -- end_time before the first trim
+        );
+        INSERT INTO legs_v2 (id, day_id, date, leg_no, start_time, end_time, from_lat, from_lng,
+          from_address, to_lat, to_lng, to_address, miles, purpose, note, source, interrupted)
+        SELECT id, day_id, date, leg_no, start_time, end_time, from_lat, from_lng,
+          from_address, to_lat, to_lng, to_address, miles, purpose, note, source, interrupted FROM legs;
+        DROP TABLE legs;
+        ALTER TABLE legs_v2 RENAME TO legs;
+        CREATE INDEX legs_date ON legs(date);
+        PRAGMA user_version = 2;
+      `);
+      for (const r of d.getAllSync<{ date: string }>('SELECT DISTINCT date FROM legs')) renumber(r.date);
+    });
+    d.execSync('PRAGMA foreign_keys = ON;');
+  }
 }
 
 export type Day = {
@@ -67,7 +105,7 @@ export type Leg = {
   day_id: number | null;
   date: string;
   leg_no: number;
-  start_time: number;
+  start_time: number | null;
   end_time: number | null;
   from_lat: number | null;
   from_lng: number | null;
@@ -80,6 +118,8 @@ export type Leg = {
   note: string | null;
   source: string;
   interrupted: number;
+  trim_end_ts: number | null;
+  orig_end_time: number | null;
 };
 
 export function localDate(ts: number): string {
@@ -99,8 +139,111 @@ export function openLeg(): Leg | null {
   );
 }
 
+// Manual legs have no start time; they sort after the tracked legs that day.
+const LEG_ORDER = 'COALESCE(start_time, 9000000000000), id';
+
 export function legsForDate(date: string): Leg[] {
-  return db().getAllSync<Leg>('SELECT * FROM legs WHERE date = ? ORDER BY start_time, leg_no', date);
+  return db().getAllSync<Leg>(`SELECT * FROM legs WHERE date = ? ORDER BY ${LEG_ORDER}`, date);
+}
+
+export function legsForYear(year: string): Leg[] {
+  return db().getAllSync<Leg>(
+    `SELECT * FROM legs WHERE date >= ? AND date <= ? ORDER BY date DESC, ${LEG_ORDER}`,
+    `${year}-01-01`, `${year}-12-31`
+  );
+}
+
+export function yearsWithLegs(): string[] {
+  return db()
+    .getAllSync<{ y: string }>('SELECT DISTINCT substr(date, 1, 4) AS y FROM legs ORDER BY y DESC')
+    .map((r) => r.y);
+}
+
+// leg_no is the leg's position within its date. Recomputed after anything
+// that adds, removes or re-dates a leg so the log never has gaps.
+export function renumber(date: string) {
+  const d = db();
+  const ids = d.getAllSync<{ id: number }>(`SELECT id FROM legs WHERE date = ? ORDER BY ${LEG_ORDER}`, date);
+  ids.forEach((r, i) => d.runSync('UPDATE legs SET leg_no = ? WHERE id = ?', i + 1, r.id));
+}
+
+export type LegEdit = {
+  date: string;
+  from_address: string | null;
+  to_address: string | null;
+  miles: number;
+  purpose: string | null;
+  note: string | null;
+};
+
+export function insertManualLeg(e: LegEdit): number {
+  const d = db();
+  let id = 0;
+  d.withTransactionSync(() => {
+    id = d.runSync(
+      `INSERT INTO legs (date, leg_no, from_address, to_address, miles, purpose, note, source)
+       VALUES (?, 0, ?, ?, ?, ?, ?, 'manual')`,
+      e.date, e.from_address, e.to_address, e.miles, e.purpose, e.note
+    ).lastInsertRowId;
+    renumber(e.date);
+  });
+  return id;
+}
+
+export function updateLeg(id: number, e: LegEdit) {
+  const d = db();
+  const old = legById(id);
+  if (!old) return;
+  d.withTransactionSync(() => {
+    d.runSync(
+      `UPDATE legs SET date = ?, from_address = ?, to_address = ?, miles = ?, purpose = ?, note = ?,
+         interrupted = CASE WHEN ? != COALESCE(miles, -1) THEN 0 ELSE interrupted END
+       WHERE id = ?`,
+      e.date, e.from_address, e.to_address, e.miles, e.purpose, e.note, e.miles, id
+    );
+    if (old.date !== e.date) {
+      renumber(old.date);
+      renumber(e.date);
+    }
+  });
+}
+
+export function setPurpose(id: number, purpose: string | null, note: string | null) {
+  db().runSync('UPDATE legs SET purpose = ?, note = ? WHERE id = ?', purpose, note, id);
+}
+
+export function deleteLeg(id: number) {
+  const d = db();
+  const leg = legById(id);
+  if (!leg) return;
+  if (leg.end_time == null && leg.source === 'gps') throw new Error('End or stop this leg before deleting it.');
+  d.withTransactionSync(() => {
+    d.runSync('DELETE FROM points WHERE leg_id = ?', id);
+    d.runSync('DELETE FROM legs WHERE id = ?', id);
+    renumber(leg.date);
+  });
+}
+
+// Cut the end of a tracked leg back to an earlier recorded point, e.g. when
+// End day was forgotten and the drive home got recorded. Non-destructive: the
+// points after the cut stay in the database, so resetting the trim restores
+// the original leg.
+export function trimLeg(id: number, cut: Fix, miles: number) {
+  const leg = legById(id);
+  if (!leg || leg.end_time == null) return;
+  db().runSync(
+    `UPDATE legs SET trim_end_ts = ?, orig_end_time = COALESCE(orig_end_time, end_time), end_time = ?,
+       to_lat = ?, to_lng = ?, to_address = NULL, miles = ?, interrupted = 0 WHERE id = ?`,
+    cut.ts, cut.ts, cut.lat, cut.lng, miles, id
+  );
+}
+
+export function resetTrim(id: number, end: Fix, miles: number) {
+  db().runSync(
+    `UPDATE legs SET trim_end_ts = NULL, end_time = COALESCE(orig_end_time, end_time), orig_end_time = NULL,
+       to_lat = ?, to_lng = ?, to_address = NULL, miles = ? WHERE id = ?`,
+    end.lat, end.lng, miles, id
+  );
 }
 
 export function legsForDay(dayId: number): Leg[] {
@@ -147,6 +290,7 @@ export function createLeg(dayId: number, legNo: number, ts: number, from: Fix): 
     dayId, date, legNo, ts, from.lat, from.lng
   ).lastInsertRowId;
   insertPoints(id, [from]);
+  renumber(date);
   return id;
 }
 
@@ -182,7 +326,7 @@ export function legsMissingAddress(): Leg[] {
 export function businessMiles(fromDate: string, toDate: string): number {
   const r = db().getFirstSync<{ m: number | null }>(
     `SELECT SUM(miles) AS m FROM legs WHERE date >= ? AND date <= ?
-       AND end_time IS NOT NULL AND (purpose IS NULL OR purpose != 'Personal')`,
+       AND (end_time IS NOT NULL OR source = 'manual') AND (purpose IS NULL OR purpose != 'Personal')`,
     fromDate, toDate
   );
   return r?.m ?? 0;

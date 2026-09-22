@@ -43,25 +43,60 @@ export function isUsable(f: Fix): boolean {
   return accuracyOf(f) <= MAX_ACCURACY_M;
 }
 
-// Distance driven through the fixes, in meters. Anchor-based drift filter:
-// a fix only counts once it is clearly away from the last counted fix, so
-// jitter while parked never accumulates. Input may be unsorted.
-export function legMeters(points: Fix[]): number {
-  const usable = points.filter(isUsable).sort((a, b) => a.ts - b.ts);
-  if (usable.length < 2) return 0;
+// If this many fixes in a row are "impossibly far" from the anchor but agree
+// with each other, the anchor is the bad one (a wild first fix, or one that
+// slipped through after a long gap), so drop it and follow them instead.
+const REANCHOR_RUN = 3;
 
-  let anchor = usable[0];
-  let total = 0;
+function tooFast(a: Fix, b: Fix): boolean {
+  const dt = (b.ts - a.ts) / 1000;
+  return dt > 0 && haversineMeters(a, b) / dt > MAX_SPEED_MPS;
+}
+
+function moved(a: Fix, b: Fix): boolean {
+  return haversineMeters(a, b) >= Math.max(MIN_MOVE_M, (accuracyOf(a) + accuracyOf(b)) / 2);
+}
+
+// The fixes the mileage is measured along. Anchor-based drift filter: a fix
+// only counts once it is clearly away from the last counted fix, so jitter
+// while parked never accumulates; jumps faster than MAX_SPEED_MPS are GPS
+// glitches. The map and the trim slider draw exactly these points, so what
+// you see is what was counted. Input may be unsorted.
+export function trackPoints(points: Fix[]): Fix[] {
+  const usable = points.filter(isUsable).sort((a, b) => a.ts - b.ts);
+  if (!usable.length) return [];
+  const track: Fix[] = [usable[0]];
+  let run: Fix[] = [];
   for (let i = 1; i < usable.length; i++) {
     const p = usable[i];
-    const d = haversineMeters(anchor, p);
-    const threshold = Math.max(MIN_MOVE_M, (accuracyOf(anchor) + accuracyOf(p)) / 2);
-    if (d < threshold) continue; // parked drift; anchor stays
-    const dt = (p.ts - anchor.ts) / 1000;
-    if (dt > 0 && d / dt > MAX_SPEED_MPS) continue; // glitch jump; anchor stays
-    total += d;
-    anchor = p;
+    const anchor = track[track.length - 1];
+    if (!moved(anchor, p)) {
+      run = [];
+      continue; // parked drift; anchor stays
+    }
+    if (!tooFast(anchor, p)) {
+      run = [];
+      track.push(p);
+      continue;
+    }
+    // Glitch, or the anchor was the glitch. Collect consistent rejects.
+    if (run.length && tooFast(run[run.length - 1], p)) run = [];
+    run.push(p);
+    if (run.length < REANCHOR_RUN) continue;
+    while (track.length && tooFast(track[track.length - 1], run[0])) track.pop();
+    for (const r of run) {
+      if (!track.length || moved(track[track.length - 1], r)) track.push(r);
+    }
+    run = [];
   }
+  return track;
+}
+
+// Distance driven through the fixes, in meters.
+export function legMeters(points: Fix[]): number {
+  const t = trackPoints(points);
+  let total = 0;
+  for (let i = 1; i < t.length; i++) total += haversineMeters(t[i - 1], t[i]);
   return total;
 }
 

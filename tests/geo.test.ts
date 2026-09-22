@@ -8,6 +8,7 @@ import {
   isUsable,
   legMeters,
   metersToMiles,
+  trackPoints,
 } from '../src/geo.ts';
 
 // Deterministic PRNG (mulberry32) so jitter is the same every run.
@@ -148,4 +149,35 @@ test('empty and single point give 0', () => {
   assert.equal(legMeters([]), 0);
   assert.equal(legMeters([{ ts: 0, lat: LAT0, lng: LNG0, accuracy: 5 }]), 0);
   assert.equal(legMeters([{ ts: 0, lat: LAT0, lng: LNG0, accuracy: null }]), 0);
+});
+
+test('a wild FIRST fix (e.g. a stale location on startup) does not wipe out the leg', () => {
+  const pts = drive({ ts: 10_000, lat: LAT0, lng: LNG0 }, METERS_PER_MILE, 30, rng(8));
+  // 1000 km away, a few seconds before the real drive starts.
+  const wild: Fix = { ...offset(LAT0, LNG0, 1_000_000, 0), ts: 5_000, accuracy: 5 };
+  const mi = report('wild first fix + 1 mi', [wild, ...pts]);
+  assert.ok(Math.abs(mi - 1) <= 0.02, `got ${mi}`);
+  assert.ok(!trackPoints([wild, ...pts]).includes(wild), 'wild fix should not be on the track');
+});
+
+test('a glitch accepted after a long gap is dropped once real fixes resume', () => {
+  const rand = rng(9);
+  const a = drive({ ts: 0, lat: LAT0, lng: LNG0 }, 800, 30, rand);
+  const end = a[a.length - 1];
+  // 15 min without fixes, then one fix 20 km away (slow enough to pass the
+  // speed check after that gap), then the real drive continues from `end`.
+  const glitch: Fix = { ...offset(end.lat, end.lng, 20_000, 0), ts: end.ts + 900_000, accuracy: 5 };
+  const b = drive({ ts: glitch.ts + 5_000, lat: end.lat, lng: end.lng }, 800, 30, rand);
+  const mi = report('gap glitch', [...a, glitch, ...b]);
+  assert.ok(mi < 1.2, `got ${mi}, the 20 km glitch leaked in`);
+  assert.ok(!trackPoints([...a, glitch, ...b]).includes(glitch));
+});
+
+test('trackPoints sums to legMeters and skips parked jitter', () => {
+  const rand = rng(10);
+  const d = drive({ ts: 0, lat: LAT0, lng: LNG0 }, 1000, 30, rand);
+  const e = d[d.length - 1];
+  const p = park({ ts: e.ts + 5000, lat: e.lat, lng: e.lng }, 600, rand);
+  const t = trackPoints([...d, ...p]);
+  assert.ok(t.length <= d.length, `parked jitter added ${t.length - d.length} track points`);
 });
