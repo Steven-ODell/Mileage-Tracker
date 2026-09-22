@@ -11,8 +11,8 @@ so in a sentence and build it as asked anyway.
 | # | Milestone | State |
 |---|---|---|
 | 1 | Installable build showing a Start day button | Done 2026-09-21, confirmed on his phone (installed by downloading the APK) |
-| 2 | Background tracking: Start day / Mark stop / End day, legs saved with miles + addresses | Next |
-| 3 | Purpose picker, editing, manual entry, trip list | |
+| 2 | Background tracking: Start day / Mark stop / End day, legs saved with miles + addresses | Done 2026-09-21, emulator-verified; awaiting his real drive |
+| 3 | Purpose picker, editing, manual entry, trip list | Next |
 | 4 | CSV export/import, weekly export reminder | |
 
 Stop after each milestone and give exact install + test steps. He tests
@@ -51,6 +51,22 @@ business miles.
 - Import the same CSV on a new phone with no duplicates.
 - Weekly local notification reminding him to export.
 
+## Code map
+
+- `index.ts` imports `src/tracking` first so the background task is defined before a headless start.
+- `src/geo.ts`: pure distance math, zero imports (Node tests import it directly). Drift filter: drop fixes worse than 30 m accuracy; a fix only counts once it is 50 m+ from the last counted one; jumps over 60 m/s are glitches.
+- `src/db.ts`: SQLite (`mileage.db`), tables `days`, `legs`, `points`. A leg row is inserted when the leg starts (`end_time` null while open), so a crash never loses a saved leg. Raw points are kept; miles are recomputed from them at leg close.
+- `src/tracking.ts`: task definition, Start/Mark stop/End day, permissions, reverse geocode (filled after save, backfilled on app foreground), interruption detection.
+- `App.tsx`: the single screen. Purpose is null on GPS legs until milestone 3 adds the picker; `businessMiles` counts null purpose as business.
+
+Interruption detection: after the app is killed, reopening it makes Android restart the location task before our code runs, so "service not running" is unreliable. The real signal is `findGap`: 2+ min without points while moving 500+ m. Flagged legs have `interrupted = 1`.
+
+## Testing
+
+- `npm test`: Node's built-in runner over `tests/*.test.ts` (geo math).
+- `scripts/emu-drive.sh`: emulator harness. `boot | install | launch | texts | tap "<text>" | shot <file> | fix <lat> <lng> | drive <lat1> <lng1> <lat2> <lng2> <mph> <interval_s> | park <lat> <lng> <s> <interval_s> | logs | kill`. `install` pre-grants every permission. Emulator fixes always report 5 m accuracy, so the accuracy filter can't be exercised there. The emulator repeats the last fix about once a second while anything listens.
+- Milestone 2 verification route (Mesa, Main St east from 33.4152,-111.8315): 1.00 mi screen-off drive + parking → leg of 1.0 mi; a 3 min force-stop mid-leg → leg flagged with the gap window.
+
 ## Build and run
 
 - `./scripts/build-apk.sh` → `build/mileage-log.apk` (release build, debug-signed, standalone; no Metro needed).
@@ -62,6 +78,7 @@ business miles.
   `ANDROID_AVD_HOME=~/.config/.android/avd`. Headless:
   `emulator -avd mileage -no-window -no-audio -no-snapshot -gpu swiftshader_indirect`.
   Kill it when done: `adb emu kill`.
+- The APK is signed with React Native's standard debug keystore (SHA-256 fac61745…), identical across prebuilds, so new builds install over old ones and keep data. Never switch keys without warning him: a signature change forces an uninstall, which wipes the database.
 - Don't `pkill -f` with a pattern that appears in a running build's command
   line; it killed the build once.
 
