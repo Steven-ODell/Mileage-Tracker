@@ -90,7 +90,7 @@ export default function LegScreen(props: { legId: number; onBack: () => void; on
         <View style={styles.info}>
           <View style={styles.topRow}>
             <Text style={styles.miles}>{(leg.miles ?? 0).toFixed(1)} mi</Text>
-            <Text style={styles.times}>{leg.source === 'manual' ? 'Entered by hand' : timeRange(leg.start_time, leg.end_time)}</Text>
+            <Text style={styles.times}>{leg.source === 'manual' ? 'Entered by hand' : leg.source === 'import' && leg.start_time == null ? 'Imported' : timeRange(leg.start_time, leg.end_time)}</Text>
           </View>
           <Text style={[styles.purpose, !leg.purpose && { color: c.red }, !isBusiness(leg.purpose) && styles.personal]}>
             {leg.purpose ?? 'No purpose yet'}
@@ -134,7 +134,7 @@ export default function LegScreen(props: { legId: number; onBack: () => void; on
           onTrim={(i) => setTrim((t) => (t ? { ...t, index: Math.max(0, Math.min(i, t.fixes.length - 1)) } : t))}
         />
       ) : (
-        <Text style={styles.noMap}>{leg.source === 'manual' ? 'No GPS track for a hand-entered leg.' : 'No GPS points recorded.'}</Text>
+        <Text style={styles.noMap}>{leg.source === 'manual' ? 'No GPS track for a hand-entered leg.' : leg.source === 'import' ? 'Imported from CSV: the GPS track isn\'t part of the export.' : 'No GPS points recorded.'}</Text>
       )}
     </View>
   );

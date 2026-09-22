@@ -2,8 +2,11 @@ import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, AppState, BackHandler, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import * as Notifications from 'expo-notifications';
+import { scheduleWeeklyReminder } from './src/backup';
+import BackupScreen from './src/BackupScreen';
 import DayMapScreen from './src/DayMapScreen';
-import { businessMiles, legById, legsForDate, legsForDay, localDate, type Leg } from './src/db';
+import { businessMiles, isDone, legById, legsForDate, legsForDay, localDate, type Leg } from './src/db';
 import EditLegScreen from './src/EditLegScreen';
 import LegRow from './src/LegRow';
 import LegScreen from './src/LegScreen';
@@ -19,7 +22,18 @@ type Route =
   | { name: 'trips' }
   | { name: 'leg'; id: number }
   | { name: 'edit'; id: number | null }
-  | { name: 'dayMap'; dayId: number };
+  | { name: 'dayMap'; dayId: number }
+  | { name: 'backup' };
+
+// Show the weekly reminder even if it fires while the app is open.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
 
 function permMessage(p: PermResult) {
   if (p === 'no-foreground') return 'Location permission is off. Mileage Log needs it to track miles.';
@@ -37,6 +51,16 @@ export default function App() {
   const pop = () => setStack((s) => s.slice(0, -1));
   const replace = (r: Route) => setStack((s) => [...s.slice(0, -1), r]);
   const top = stack[stack.length - 1];
+
+  useEffect(() => {
+    scheduleWeeklyReminder().catch((e) => console.warn('reminder', e));
+  }, []);
+
+  // Tapping the weekly reminder opens Backup.
+  const tapped = Notifications.useLastNotificationResponse();
+  useEffect(() => {
+    if (tapped?.notification.request.content.data?.open === 'backup') setStack([{ name: 'backup' }]);
+  }, [tapped]);
 
   useEffect(() => {
     if (!top) return;
@@ -69,6 +93,8 @@ export default function App() {
     );
   } else if (top?.name === 'dayMap') {
     screen = <DayMapScreen dayId={top.dayId} onBack={pop} />;
+  } else if (top?.name === 'backup') {
+    screen = <BackupScreen onBack={pop} />;
   }
 
   return (
@@ -201,7 +227,7 @@ function Home({ visible, push }: { visible: boolean; push: (r: Route) => void })
   if (!status) return null;
 
   const { day, leg } = status;
-  const done = legs.filter((l) => l.end_time != null || l.source === 'manual');
+  const done = legs.filter(isDone);
 
   return (
     <>
@@ -284,6 +310,7 @@ function Home({ visible, push }: { visible: boolean; push: (r: Route) => void })
           <Btn label="All trips" kind="outline" onPress={() => push({ name: 'trips' })} style={{ flex: 1 }} />
           <Btn label="+ Add drive" kind="outline" onPress={() => push({ name: 'edit', id: null })} style={{ flex: 1 }} />
         </View>
+        <Btn label="Backup / export CSV" kind="outline" onPress={() => push({ name: 'backup' })} />
 
         {!day && (
           <Pressable onPress={() => Linking.openSettings()}>

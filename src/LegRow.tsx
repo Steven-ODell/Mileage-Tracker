@@ -12,7 +12,7 @@ export default function LegRow({ leg, onPress }: { leg: Leg; onPress: () => void
     <Pressable onPress={onPress} style={({ pressed }) => [styles.leg, pressed && { backgroundColor: c.pressedBg }]}>
       <View style={styles.top}>
         <Text style={styles.no}>Leg {leg.leg_no}</Text>
-        <Text style={styles.time}>{leg.source === 'manual' ? 'entered by hand' : timeRange(leg.start_time, leg.end_time)}</Text>
+        <Text style={styles.time}>{leg.source === 'manual' ? 'entered by hand' : leg.source === 'import' && leg.start_time == null ? 'imported' : timeRange(leg.start_time, leg.end_time)}</Text>
         <Text style={[styles.miles, personal && styles.dim]}>{(leg.miles ?? 0).toFixed(1)} mi</Text>
       </View>
       <Text style={[styles.purpose, !leg.purpose && { color: c.red }, personal && styles.dim]} numberOfLines={1}>

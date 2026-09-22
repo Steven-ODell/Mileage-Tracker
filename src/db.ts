@@ -90,6 +90,20 @@ function migrate(d: SQLite.SQLiteDatabase) {
     });
     d.execSync('PRAGMA foreign_keys = ON;');
   }
+  if (v < 3) {
+    d.execSync(`
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+      PRAGMA user_version = 3;
+    `);
+  }
+}
+
+export function getSetting(key: string): string | null {
+  return db().getFirstSync<{ value: string }>('SELECT value FROM settings WHERE key = ?', key)?.value ?? null;
+}
+
+export function setSetting(key: string, value: string) {
+  db().runSync('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
 }
 
 export type Day = {
@@ -167,6 +181,53 @@ export function renumber(date: string) {
   ids.forEach((r, i) => d.runSync('UPDATE legs SET leg_no = ? WHERE id = ?', i + 1, r.id));
 }
 
+// A leg that belongs in the log: finished, or entered by hand / imported.
+// Only a GPS leg that is still being driven is left out.
+export function isDone(l: Leg) {
+  return l.end_time != null || l.source !== 'gps';
+}
+
+// Every finished leg from `from` on, in log order (for CSV export).
+export function legsSince(from: string): Leg[] {
+  return db()
+    .getAllSync<Leg>(`SELECT * FROM legs WHERE date >= ? ORDER BY date, ${LEG_ORDER}`, from)
+    .filter(isDone);
+}
+
+// Inserts legs from a CSV, skipping any whose key is already on the phone
+// (or appears twice in the file). keyOf is csv.dedupeKey. All or nothing:
+// one transaction, so a failure part-way leaves the log unchanged.
+export function importLegs<T extends Omit<Leg, 'id' | 'day_id' | 'source' | 'interrupted' | 'trim_end_ts' | 'orig_end_time'>>(
+  legs: T[],
+  keyOf: (l: T | Leg) => string
+): { added: number; skipped: number } {
+  const d = db();
+  const dates = [...new Set(legs.map((l) => l.date))];
+  const seen = new Set<string>();
+  for (const date of dates) for (const l of legsForDate(date)) seen.add(keyOf(l));
+  let added = 0;
+  let skipped = 0;
+  d.withTransactionSync(() => {
+    for (const l of legs) {
+      const k = keyOf(l);
+      if (seen.has(k)) {
+        skipped++;
+        continue;
+      }
+      seen.add(k);
+      d.runSync(
+        `INSERT INTO legs (date, leg_no, start_time, end_time, from_lat, from_lng, from_address, to_lat, to_lng,
+           to_address, miles, purpose, note, source) VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'import')`,
+        l.date, l.start_time, l.end_time, l.from_lat, l.from_lng, l.from_address, l.to_lat, l.to_lng,
+        l.to_address, l.miles, l.purpose, l.note
+      );
+      added++;
+    }
+    for (const date of dates) renumber(date);
+  });
+  return { added, skipped };
+}
+
 export type LegEdit = {
   date: string;
   from_address: string | null;
@@ -216,7 +277,7 @@ export function deleteLeg(id: number) {
   const d = db();
   const leg = legById(id);
   if (!leg) return;
-  if (leg.end_time == null && leg.source === 'gps') throw new Error('End or stop this leg before deleting it.');
+  if (!isDone(leg)) throw new Error('End or stop this leg before deleting it.');
   d.withTransactionSync(() => {
     d.runSync('DELETE FROM points WHERE leg_id = ?', id);
     d.runSync('DELETE FROM legs WHERE id = ?', id);
@@ -326,7 +387,7 @@ export function legsMissingAddress(): Leg[] {
 export function businessMiles(fromDate: string, toDate: string): number {
   const r = db().getFirstSync<{ m: number | null }>(
     `SELECT SUM(miles) AS m FROM legs WHERE date >= ? AND date <= ?
-       AND (end_time IS NOT NULL OR source = 'manual') AND (purpose IS NULL OR purpose != 'Personal')`,
+       AND (end_time IS NOT NULL OR source != 'gps') AND (purpose IS NULL OR purpose != 'Personal')`,
     fromDate, toDate
   );
   return r?.m ?? 0;

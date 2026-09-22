@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
-import { legsForYear, yearsWithLegs, type Leg } from './db';
+import { isDone, legsForYear, yearsWithLegs, type Leg } from './db';
 import LegRow from './LegRow';
 import { isBusiness } from './purposes';
 import { Btn, Chip, dayLabel, Header, makeUi, type Palette, useColors, useStyles } from './ui';
 
 const business = (legs: Leg[]) =>
-  legs.filter((l) => l.end_time != null || l.source === 'manual').filter((l) => isBusiness(l.purpose)).reduce((s, l) => s + (l.miles ?? 0), 0);
+  legs.filter(isDone).filter((l) => isBusiness(l.purpose)).reduce((s, l) => s + (l.miles ?? 0), 0);
 
 export default function TripsScreen(props: {
   onBack: () => void;

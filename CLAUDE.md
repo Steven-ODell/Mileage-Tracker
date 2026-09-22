@@ -15,7 +15,7 @@ so in a sentence and build it as asked anyway.
 | 2 | Background tracking: Start day / Mark stop / End day, legs saved with miles + addresses | Done 2026-09-21, emulator-verified; awaiting his real drive |
 | 2b | Route map preview (his add-on request) | Done 2026-09-21, emulator-verified; he tests 2 + 2b on 2026-09-22 with a coworker |
 | 3 | Purpose picker, editing, manual entry, trip list + his adds: delete, full edit, AllTrails-style Trim end, dark mode (map stays light) | Done 2026-09-21, emulator-verified; he tests 2/2b/3 on 2026-09-22 |
-| 4 | CSV export/import, weekly export reminder | Next |
+| 4 | CSV export/import, weekly export reminder | Done 2026-09-21, emulator-verified (export read back, wipe + restore, reminder fired) |
 
 Ideas he asked to keep (not built): `PLANS.md` (fuel cost from MPG + gas price).
 
@@ -66,6 +66,8 @@ business miles.
 - DB v2 (migration in `db.ts`): `legs.start_time` nullable (manual legs), `trim_end_ts` + `orig_end_time`. Trim is non-destructive; points past the cut stay, reset restores the last raw point as To. `renumber(date)` keeps `leg_no` gapless per date after add/delete/re-date.
 - Screens: `App.tsx` holds a tiny stack (Home always mounted underneath). `TripsScreen` (year → days → legs), `LegScreen` (details, Edit/Trim end/Delete, map), `EditLegScreen` (edit + manual add), `DayMapScreen`, `PurposeSheet` (after Mark stop / End day).
 - Theme: `src/ui.tsx` palette follows the phone (`useColorScheme`); styles are `makeStyles(c)` + `useStyles`. `app.json` `userInterfaceStyle: automatic` needs `expo-system-ui`. The map page is always light.
+- `src/csv.ts`: pure CSV write/parse (zero imports, Node-tested). Times are local HH:MM; import also accepts M/D/YYYY and 12-hour times because Sheets rewrites them. `dedupeKey` = date, times, miles, coords at 4 dp, addresses; purpose/note excluded so edits don't cause duplicates. Imported legs get `source = 'import'`, no points. `isDone(leg)` in db.ts is the "belongs in the log" test (not an open GPS leg).
+- `src/backup.ts`: export (cache file → expo-sharing), import (document picker → `importLegs`, one transaction), weekly reminder (expo-notifications WEEKLY trigger, Fridays 17:00, rescheduled idempotently on every launch; tapping it opens Backup). DB v3 adds a `settings` key/value table (`last_export`).
 - `App.tsx`: home screen; the map opens from the live card's Map button, a tapped leg row, or "Map of day". Purpose is null on GPS legs until milestone 3 adds the picker; `businessMiles` counts null purpose as business.
 
 Interruption detection: after the app is killed, reopening it makes Android restart the location task before our code runs, so "service not running" is unreliable. The real signal is `findGap`: 2+ min without points while moving 500+ m. Flagged legs have `interrupted = 1`.
@@ -75,6 +77,8 @@ Interruption detection: after the app is killed, reopening it makes Android rest
 - `npm test`: Node's built-in runner over `tests/*.test.ts` (geo math).
 - `scripts/emu-drive.sh`: emulator harness. `boot | install | launch | texts | tap "<text>" | shot <file> | fix <lat> <lng> | drive <lat1> <lng1> <lat2> <lng2> <mph> <interval_s> | park <lat> <lng> <s> <interval_s> | logs | kill`. `install` pre-grants every permission. Emulator fixes always report 5 m accuracy, so the accuracy filter can't be exercised there. The emulator repeats the last fix about once a second while anything listens.
 - Milestone 2 verification route (Mesa, Main St east from 33.4152,-111.8315): 1.00 mi screen-off drive + parking → leg of 1.0 mi; a 3 min force-stop mid-leg → leg flagged with the gap window.
+
+Verifying an export on the emulator: release builds aren't debuggable, so `run-as` can't read the cache. Add `debuggable true` to the release block in `android/app/build.gradle` temporarily, `./gradlew assembleRelease`, install, export, then `adb shell run-as com.sao.mileagelog cat cache/mileage-log-*.csv`. Remove the line afterwards. To fire the reminder: `adb root`, `adb shell settings put global auto_time 0`, `adb shell 'date -s "YYYY-MM-DD 16:59:50"'`; restore `auto_time 1` after. Force-stopping the app cancels its alarms until it is opened again.
 
 ## Build and run
 
