@@ -41,3 +41,4 @@ yarn-error.*
 /android
 build/
 build.log
+src/generated/

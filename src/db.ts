@@ -187,3 +187,7 @@ export function businessMiles(fromDate: string, toDate: string): number {
   );
   return r?.m ?? 0;
 }
+
+export function legById(id: number): Leg | null {
+  return db().getFirstSync<Leg>('SELECT * FROM legs WHERE id = ?', id);
+}

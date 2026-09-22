@@ -1,0 +1,109 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<style>/*MAPLIBRE_CSS*/</style>
+<style>
+  html, body, #map { margin: 0; height: 100%; width: 100%; background: #eef0ea; }
+  #note { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 2; display: none;
+    background: #fff3d6; color: #222; font: 14px sans-serif; padding: 8px 10px; border-radius: 8px; }
+  #fit { position: absolute; right: 10px; bottom: 34px; z-index: 2; background: #fff; border: 0;
+    border-radius: 8px; padding: 10px 14px; font: 600 15px sans-serif; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+  .pin { font: 700 13px sans-serif; color: #fff; border: 2px solid #fff; border-radius: 14px;
+    min-width: 24px; height: 24px; line-height: 24px; text-align: center; padding: 0 4px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+  .now { width: 16px; height: 16px; border-radius: 50%; background: #1565c0; border: 3px solid #fff;
+    box-shadow: 0 0 0 6px rgba(21,101,192,.25); }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="note"></div>
+<button id="fit">Fit route</button>
+<script>/*MAPLIBRE_JS*/</script>
+<script>
+// Data arrives from React Native via window.setData(payload):
+// { legs: [{ no, color, open, points: [[lng,lat]...], dropped: [[lng,lat]...] }],
+//   pins: [{ lng, lat, label, color }], now: [lng,lat] | null }
+var COLORS = ['#1b7f3b', '#1565c0', '#c62828', '#6a1b9a', '#ef6c00'];
+var STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+var BLANK = { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#eef0ea' } }] };
+var map, ready = false, pending = null, last = null, fitted = false, markers = [];
+
+function note(t) { var n = document.getElementById('note'); n.textContent = t; n.style.display = t ? 'block' : 'none'; }
+
+function start(style) {
+  ready = false;
+  map = new maplibregl.Map({ container: 'map', style: style, attributionControl: { compact: true }, center: [-111.9, 33.45], zoom: 9 });
+  map.on('load', function () {
+    map.addSource('route', { type: 'geojson', data: empty() });
+    map.addSource('dropped', { type: 'geojson', data: empty() });
+    map.addLayer({ id: 'casing', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#fff', 'line-width': 8 } });
+    map.addLayer({ id: 'line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': ['get', 'color'], 'line-width': 4.5 } });
+    map.addLayer({ id: 'dropped', type: 'circle', source: 'dropped',
+      paint: { 'circle-radius': 3, 'circle-color': '#888', 'circle-opacity': 0.5 } });
+    ready = true;
+    if (pending) { render(pending); pending = null; } else if (last) { render(last); }
+  });
+}
+
+function empty() { return { type: 'FeatureCollection', features: [] }; }
+
+function render(d) {
+  last = d;
+  var lines = [], drops = [], all = [];
+  d.legs.forEach(function (l, i) {
+    var color = COLORS[i % COLORS.length];
+    if (l.points.length > 1) lines.push({ type: 'Feature', properties: { color: color }, geometry: { type: 'LineString', coordinates: l.points } });
+    l.dropped.forEach(function (p) { drops.push({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: p } }); });
+    all = all.concat(l.points);
+  });
+  map.getSource('route').setData({ type: 'FeatureCollection', features: lines });
+  map.getSource('dropped').setData({ type: 'FeatureCollection', features: drops });
+  markers.forEach(function (m) { m.remove(); });
+  markers = [];
+  d.pins.forEach(function (p) {
+    var el = document.createElement('div');
+    el.className = 'pin'; el.style.background = p.color; el.textContent = p.label;
+    markers.push(new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map));
+    all.push([p.lng, p.lat]);
+  });
+  if (d.now) {
+    var el = document.createElement('div'); el.className = 'now';
+    markers.push(new maplibregl.Marker({ element: el }).setLngLat(d.now).addTo(map));
+  }
+  if (!fitted && all.length) { fit(all); fitted = true; }
+}
+
+function fit(all) {
+  if (!all || !all.length) return;
+  var b = new maplibregl.LngLatBounds(all[0], all[0]);
+  all.forEach(function (c) { b.extend(c); });
+  map.fitBounds(b, { padding: 50, maxZoom: 16, duration: 0 });
+}
+
+document.getElementById('fit').onclick = function () {
+  if (!last) return;
+  var all = [];
+  last.legs.forEach(function (l) { all = all.concat(l.points); });
+  last.pins.forEach(function (p) { all.push([p.lng, p.lat]); });
+  fit(all);
+};
+
+window.setData = function (d) { if (ready) render(d); else pending = d; };
+
+// No signal means no basemap. Fall back to a blank background so the route
+// itself still draws.
+start(STYLE_URL);
+setTimeout(function () {
+  if (ready) return;
+  map.remove();
+  start(BLANK);
+  note('Map tiles did not load (no signal?). Showing the route without streets.');
+}, 10000);
+</script>
+</body>
+</html>

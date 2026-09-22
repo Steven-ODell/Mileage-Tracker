@@ -4,6 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 eval "$(mise env -s bash)"
+node scripts/gen-map-html.mjs >/dev/null
 npx expo prebuild --platform android --no-install >/dev/null
 (cd android && ./gradlew assembleRelease -q)
 mkdir -p build

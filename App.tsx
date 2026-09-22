@@ -1,8 +1,9 @@
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View,
+  Alert, AppState, BackHandler, Linking, Pressable, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
+import MapScreen, { type MapTarget } from './src/MapScreen';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { businessMiles, legsForDate, legsForDay, localDate, type Leg } from './src/db';
 import {
@@ -31,16 +32,31 @@ function permMessage(p: PermResult) {
 }
 
 export default function App() {
+  const [map, setMap] = useState<MapTarget | null>(null);
+
+  useEffect(() => {
+    if (!map) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setMap(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [map]);
+
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-        <Home />
+        {/* Home stays mounted under the map so its polling and state survive. */}
+        <View style={[styles.screen, map && styles.hidden]}>
+          <Home onOpenMap={setMap} />
+        </View>
+        {map && <MapScreen target={map} onBack={() => setMap(null)} />}
       </SafeAreaView>
     </SafeAreaProvider>
   );
 }
 
-function Home() {
+function Home({ onOpenMap }: { onOpenMap: (t: MapTarget) => void }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [legs, setLegs] = useState<Leg[]>([]);
   const [todayMiles, setTodayMiles] = useState(0);
@@ -199,6 +215,7 @@ function Home() {
                 Miles may be short; check them after you stop.
               </Text>
             ) : null}
+            <Btn label="Map" kind="outline" onPress={() => onOpenMap({ kind: 'day', dayId: day.id })} />
             <Btn testID="mark-stop" label="Mark stop" big onPress={onStop} disabled={busy} />
             <Btn testID="end-day" label="End day" kind="danger" onPress={() => onEnd(false)} disabled={busy} />
           </View>
@@ -206,12 +223,19 @@ function Home() {
 
         {notice && <Text style={styles.notice}>{notice}</Text>}
 
-        <Text style={styles.section}>{day ? `Day of ${day.date}` : 'Today'}</Text>
+        <View style={styles.sectionRow}>
+          <Text style={styles.section}>{day ? `Day of ${day.date}` : 'Today'}</Text>
+          {!day && legs.some((l) => l.end_time != null && l.day_id != null) && (
+            <Pressable onPress={() => onOpenMap({ kind: 'day', dayId: legs[legs.length - 1].day_id! })}>
+              <Text style={styles.link}>Map of day</Text>
+            </Pressable>
+          )}
+        </View>
         {legs.filter((l) => l.end_time != null).length === 0 && (
           <Text style={styles.empty}>No legs yet.</Text>
         )}
         {legs.filter((l) => l.end_time != null).map((l) => (
-          <View key={l.id} style={styles.leg}>
+          <Pressable key={l.id} style={styles.leg} onPress={() => onOpenMap({ kind: 'leg', legId: l.id })}>
             <View style={styles.legTop}>
               <Text style={styles.legNo}>Leg {l.leg_no}</Text>
               <Text style={styles.legTime}>{time(l.start_time)}–{time(l.end_time)}</Text>
@@ -220,7 +244,7 @@ function Home() {
             <Text style={styles.legPlace}>{place(l.from_address, l.from_lat, l.from_lng)}</Text>
             <Text style={styles.legPlace}>→ {place(l.to_address, l.to_lat, l.to_lng)}</Text>
             {l.interrupted ? <Text style={styles.flag}>Interrupted: check these miles</Text> : null}
-          </View>
+          </Pressable>
         ))}
 
         {!day && (
@@ -276,6 +300,9 @@ function Btn(props: {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#fff' },
+  hidden: { display: 'none' },
+  sectionRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 28, marginBottom: 8 },
+  link: { fontSize: 15, color: GREEN, fontWeight: '700' },
   content: { padding: 20, paddingBottom: 48 },
   title: { fontSize: 26, fontWeight: '700' },
   totals: { flexDirection: 'row', gap: 16, marginTop: 4, marginBottom: 20 },
@@ -297,7 +324,7 @@ const styles = StyleSheet.create({
   btnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
   btnTextBig: { fontSize: 24 },
   notice: { marginTop: 12, fontSize: 15, color: GREEN },
-  section: { fontSize: 18, fontWeight: '700', marginTop: 28, marginBottom: 8 },
+  section: { fontSize: 18, fontWeight: '700' },
   empty: { color: '#777', fontSize: 15 },
   leg: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ccc' },
   legTop: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
