@@ -19,9 +19,18 @@ so in a sentence and build it as asked anyway.
 
 Ideas he asked to keep (not built): `PLANS.md` (fuel cost from MPG + gas price).
 
-Stop after each milestone and give exact install + test steps. He tests
+**As of 2026-09-21 all four spec milestones plus his add-ons are built.** He
+field-tests everything on 2026-09-22 with a coworker (odometer vs leg miles,
+notification staying up all day, false "Interrupted" flags, trim on a real
+long leg, dark mode, export opened in Sheets). Next work is whatever that test
+turns up; don't start PLANS.md items unless he asks.
+
+Untested on the emulator: closing a day left open overnight (stale-day banner).
+
+Working rules: after any change, give exact install + test steps. He tests
 tracking by driving; everything else gets verified on the emulator first
-(install, launch, screenshot, check logcat for FATAL) before presenting.
+(install, launch, screenshot, check logcat for FATAL) before presenting. He
+installs by downloading the APK; new builds must keep the same signing key.
 
 ## Spec
 
