@@ -11,6 +11,8 @@ import EditLegScreen from './src/EditLegScreen';
 import LegRow from './src/LegRow';
 import LegScreen from './src/LegScreen';
 import PurposeSheet from './src/PurposeSheet';
+import { ACTION_END_DAY, ACTION_MARK_STOP, claimAction } from './src/notify';
+import { askUnrestricted, isOptimized } from './src/power';
 import {
   backfillAddresses, endDay, getStatus, markStop, resumeTracking, startDay,
   type PermResult, type Status,
@@ -25,10 +27,11 @@ type Route =
   | { name: 'dayMap'; dayId: number }
   | { name: 'backup' };
 
-// Show the weekly reminder even if it fires while the app is open.
+// Show the weekly reminder even if it fires while the app is open. The
+// controls notification is ambient, so it goes to the shade without a banner.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
+  handleNotification: async (n) => ({
+    shouldShowBanner: n.request.content.data?.controls !== true,
     shouldShowList: true,
     shouldPlaySound: false,
     shouldSetBadge: false,
@@ -101,7 +104,7 @@ export default function App() {
     <SafeAreaProvider>
       <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
         <View style={[styles.screen, top && styles.hidden]}>
-          <Home visible={!top} push={push} />
+          <Home visible={!top} push={push} goHome={() => setStack([])} />
         </View>
         {screen}
         <ExpoStatusBar style="auto" />
@@ -110,7 +113,7 @@ export default function App() {
   );
 }
 
-function Home({ visible, push }: { visible: boolean; push: (r: Route) => void }) {
+function Home({ visible, push, goHome }: { visible: boolean; push: (r: Route) => void; goHome: () => void }) {
   const c = useColors();
   const styles = useStyles(makeStyles);
   const ui = useStyles(makeUi);
@@ -122,6 +125,7 @@ function Home({ visible, push }: { visible: boolean; push: (r: Route) => void })
   const [notice, setNotice] = useState<string | null>(null);
   const [permProblem, setPermProblem] = useState<PermResult | null>(null);
   const [picker, setPicker] = useState<Leg | null>(null);
+  const [optimized, setOptimized] = useState(false);
   const geocoding = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -143,13 +147,21 @@ function Home({ visible, push }: { visible: boolean; push: (r: Route) => void })
     }
   }, [refresh]);
 
+  // Re-checked on every foreground, so the warning clears itself as soon as
+  // he comes back from Android's dialog.
+  const checkBattery = useCallback(async () => setOptimized(await isOptimized()), []);
+
   useEffect(() => {
     refresh().then(fillAddresses);
+    checkBattery();
     const sub = AppState.addEventListener('change', (st) => {
-      if (st === 'active') refresh().then(fillAddresses);
+      if (st === 'active') {
+        refresh().then(fillAddresses);
+        checkBattery();
+      }
     });
     return () => sub.remove();
-  }, [refresh, fillAddresses]);
+  }, [refresh, fillAddresses, checkBattery]);
 
   // Coming back from another screen: edits or deletes may have happened.
   useEffect(() => {
@@ -224,6 +236,21 @@ function Home({ visible, push }: { visible: boolean; push: (r: Route) => void })
     if (r === 'ok') setNotice('Tracking resumed.');
   });
 
+  // Mark stop / End day tapped on the tracking notification or the parked
+  // nudge. Both open the app, so the purpose picker and the End day
+  // confirmation work exactly as they do from the buttons on this screen.
+  const action = Notifications.useLastNotificationResponse();
+  useEffect(() => {
+    if (!action) return;
+    const which = action.actionIdentifier;
+    if (which !== ACTION_MARK_STOP && which !== ACTION_END_DAY) return;
+    // The launching response sticks around; only act on it the first time.
+    if (!claimAction(`${action.notification.date}|${which}`)) return;
+    goHome();
+    if (which === ACTION_MARK_STOP) onStop();
+    else onEnd(false);
+  }, [action]);
+
   if (!status) return null;
 
   const { day, leg } = status;
@@ -242,6 +269,16 @@ function Home({ visible, push }: { visible: boolean; push: (r: Route) => void })
           <View style={[styles.banner, styles.bannerRed]}>
             <Text style={styles.bannerText}>{permMessage(permProblem)}</Text>
             <Btn label="Open settings" kind="outline" onPress={() => Linking.openSettings()} />
+          </View>
+        )}
+
+        {optimized && (
+          <View style={[styles.banner, styles.bannerAmber]}>
+            <Text style={styles.bannerText}>
+              Battery optimization is on for Mileage Log. Android can kill tracking with the screen off, which loses the
+              rest of a leg without saying so.
+            </Text>
+            <Btn label="Allow background use" kind="outline" onPress={() => askUnrestricted().catch(() => {})} />
           </View>
         )}
 
@@ -312,7 +349,7 @@ function Home({ visible, push }: { visible: boolean; push: (r: Route) => void })
         </View>
         <Btn label="Backup / export CSV" kind="outline" onPress={() => push({ name: 'backup' })} />
 
-        {!day && (
+        {!day && !optimized && (
           <Pressable onPress={() => Linking.openSettings()}>
             <Text style={styles.tip}>
               If tracking ever stops with the screen off, open App settings → Battery and choose Unrestricted.

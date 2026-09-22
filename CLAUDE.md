@@ -16,16 +16,19 @@ so in a sentence and build it as asked anyway.
 | 2b | Route map preview (his add-on request) | Done 2026-09-21, emulator-verified; he tests 2 + 2b on 2026-09-22 with a coworker |
 | 3 | Purpose picker, editing, manual entry, trip list + his adds: delete, full edit, AllTrails-style Trim end, dark mode (map stays light) | Done 2026-09-21, emulator-verified; he tests 2/2b/3 on 2026-09-22 |
 | 4 | CSV export/import, weekly export reminder | Done 2026-09-21, emulator-verified (export read back, wipe + restore, reminder fired) |
+| 5 | Post-field-test adds: Mark stop / End day notification buttons, battery-optimization warning, still-parked nudge, Canvassing purpose | Done 2026-09-22, emulator-verified |
 
 Ideas he asked to keep (not built): `PLANS.md` (fuel cost from MPG + gas price).
 
-**As of 2026-09-21 all four spec milestones plus his add-ons are built.** He
-field-tests everything on 2026-09-22 with a coworker (odometer vs leg miles,
-notification staying up all day, false "Interrupted" flags, trim on a real
-long leg, dark mode, export opened in Sheets). Next work is whatever that test
-turns up; don't start PLANS.md items unless he asks.
+**He field-tested 2026-09-22 and reported nothing wrong.** The four spec
+milestones, his add-ons and the milestone 5 adds are all built. Of the
+suggestions made that day he declined an odometer field (said it wasn't worth
+it) and hasn't decided on the backup ideas (last-export age on the home
+screen, auto-export to a Drive folder on End day). Don't start PLANS.md items
+unless he asks.
 
 Untested on the emulator: closing a day left open overnight (stale-day banner).
+Untested anywhere: whether the OEM battery flag on his actual phone was on.
 
 Working rules: after any change, give exact install + test steps. He tests
 tracking by driving; everything else gets verified on the emulator first
@@ -39,8 +42,8 @@ installs by downloading the APK; new builds must keep the same signing key.
 - Mark stop: tapped after parking. Ends the current leg, opens the purpose picker, next leg starts here.
 - End day: tapped after parking at the last stop. Closes the final leg (with picker), stops tracking. The drive home is never recorded.
 
-**Purpose picker**: preset buttons Inspection, Adjuster meeting, Office, Supply
-run, Personal, plus an optional note (claim name or address). One tap + save
+**Purpose picker**: preset buttons Inspection, Canvassing (his add, 2026-09-22),
+Adjuster meeting, Office, Supply run, Personal, plus an optional note (claim name or address). One tap + save
 is the common path. Purpose and note are editable later. Personal legs are not
 business miles.
 
@@ -76,6 +79,9 @@ business miles.
 - Screens: `App.tsx` holds a tiny stack (Home always mounted underneath). `TripsScreen` (year → days → legs), `LegScreen` (details, Edit/Trim end/Delete, map), `EditLegScreen` (edit + manual add), `DayMapScreen`, `PurposeSheet` (after Mark stop / End day).
 - Theme: `src/ui.tsx` palette follows the phone (`useColorScheme`); styles are `makeStyles(c)` + `useStyles`. `app.json` `userInterfaceStyle: automatic` needs `expo-system-ui`. The map page is always light.
 - `src/csv.ts`: pure CSV write/parse (zero imports, Node-tested). Times are local HH:MM; import also accepts M/D/YYYY and 12-hour times because Sheets rewrites them. `dedupeKey` = date, times, miles, coords at 4 dp, addresses; purpose/note excluded so edits don't cause duplicates. Imported legs get `source = 'import'`, no points. `isDone(leg)` in db.ts is the "belongs in the log" test (not an open GPS leg).
+- `src/notify.ts`: the notifications that drive tracking, no React so the background task can import it. A sticky "controls" notification carries the Mark stop / End day buttons that expo-location's own foreground-service notification can't have, so the shade shows two rows all day. Both buttons open the app (Mark stop needs the purpose picker, End day the confirm), and the response that launched the app is claimed in `settings.handled_action` so a tap isn't replayed on every later launch. Channel importance is frozen by Android once created: changing it needs a new channel id.
+- Still-parked nudge: the background task calls `bumpParkedNudge` on every batch with real movement (`anyMovement` in geo.ts, same threshold the miles are counted by), which keeps a one-shot notification sitting 30 min past the last movement. So it can only fire once the car has stopped, and a leg that has never moved (parked at a job after Mark stop) never arms one. Start day / Mark stop / End day cancel it. Force-stopping the app drops the alarm and both notifications until it's opened again, same as the weekly reminder.
+- `src/power.ts`: `isOptimized()` (expo-battery) drives the amber home-screen banner; `askUnrestricted()` opens Android's own one-tap dialog via expo-intent-launcher, which needs REQUEST_IGNORE_BATTERY_OPTIMIZATIONS in `app.json`. Re-checked on every foreground, so the banner clears itself.
 - `src/backup.ts`: export (cache file → expo-sharing), import (document picker → `importLegs`, one transaction), weekly reminder (expo-notifications WEEKLY trigger, Fridays 17:00, rescheduled idempotently on every launch; tapping it opens Backup). DB v3 adds a `settings` key/value table (`last_export`).
 - `App.tsx`: home screen; the map opens from the live card's Map button, a tapped leg row, or "Map of day". Purpose is null on GPS legs until milestone 3 adds the picker; `businessMiles` counts null purpose as business.
 
@@ -85,6 +91,8 @@ Interruption detection: after the app is killed, reopening it makes Android rest
 
 - `npm test`: Node's built-in runner over `tests/*.test.ts` (geo math).
 - `scripts/emu-drive.sh`: emulator harness. `boot | install | launch | texts | tap "<text>" | shot <file> | fix <lat> <lng> | drive <lat1> <lng1> <lat2> <lng2> <mph> <interval_s> | park <lat> <lng> <s> <interval_s> | logs | kill`. `install` pre-grants every permission. Emulator fixes always report 5 m accuracy, so the accuracy filter can't be exercised there. The emulator repeats the last fix about once a second while anything listens.
+- `install` also battery-whitelists the app, so testing the battery banner means removing it first: `adb shell dumpsys deviceidle whitelist -com.sao.mileagelog`.
+- Notification buttons: `adb shell cmd statusbar expand-notifications`, tap that row's Expand chevron (bounds from a uiautomator dump — `emu-drive.sh tap` can't pick between the several "Expand" descriptions), then `emu-drive.sh tap "Mark stop"`. To fire the parked nudge, read its time out of `adb shell dumpsys alarm` and jump the clock the same way as the weekly reminder.
 - Milestone 2 verification route (Mesa, Main St east from 33.4152,-111.8315): 1.00 mi screen-off drive + parking → leg of 1.0 mi; a 3 min force-stop mid-leg → leg flagged with the gap window.
 
 Verifying an export on the emulator: release builds aren't debuggable, so `run-as` can't read the cache. Add `debuggable true` to the release block in `android/app/build.gradle` temporarily, `./gradlew assembleRelease`, install, export, then `adb shell run-as com.sao.mileagelog cat cache/mileage-log-*.csv`. Remove the line afterwards. To fire the reminder: `adb root`, `adb shell settings put global auto_time 0`, `adb shell 'date -s "YYYY-MM-DD 16:59:50"'`; restore `auto_time 1` after. Force-stopping the app cancels its alarms until it is opened again.

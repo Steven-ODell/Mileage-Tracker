@@ -4,6 +4,7 @@ import {
   type Fix,
   METERS_PER_MILE,
   MAX_ACCURACY_M,
+  anyMovement,
   haversineMeters,
   isUsable,
   legMeters,
@@ -180,4 +181,31 @@ test('trackPoints sums to legMeters and skips parked jitter', () => {
   const p = park({ ts: e.ts + 5000, lat: e.lat, lng: e.lng }, 600, rand);
   const t = trackPoints([...d, ...p]);
   assert.ok(t.length <= d.length, `parked jitter added ${t.length - d.length} track points`);
+});
+
+// anyMovement drives the still-parked nudge: every batch it says true for
+// pushes the nudge 30 min further out, so a false positive while parked means
+// the nudge never fires.
+test('anyMovement sees a drive and ignores a whole hour parked', () => {
+  const rand = rng(11);
+  const d = drive({ ts: 0, lat: LAT0, lng: LNG0 }, 1000, 30, rand);
+  assert.ok(anyMovement(d[0], d.slice(1, 4)), 'driving should count as movement');
+
+  const e = d[d.length - 1];
+  const p = park({ ts: e.ts + 5000, lat: e.lat, lng: e.lng }, 3600, rand);
+  // Same walk the task does: each batch of fixes against the point before it.
+  let anchor: Fix = e;
+  for (const f of p) {
+    assert.ok(!anyMovement(anchor, [f]), `parked jitter counted as movement at ts ${f.ts}`);
+    anchor = f;
+  }
+});
+
+test('anyMovement ignores a lone glitch and a leg that has no points yet', () => {
+  const here: Fix = { ts: 0, lat: LAT0, lng: LNG0, accuracy: 5 };
+  assert.ok(!anyMovement(null, [here]), 'no anchor means nothing has moved yet');
+  const far: Fix = { ...offset(LAT0, LNG0, 20_000, 0), ts: 5_000, accuracy: 5 };
+  assert.ok(!anyMovement(here, [far]), '20 km in 5 s is a glitch, not a drive');
+  const junk: Fix = { ...offset(LAT0, LNG0, 300, 0), ts: 60_000, accuracy: MAX_ACCURACY_M + 10 };
+  assert.ok(!anyMovement(here, [junk]), 'a low-accuracy fix should not count');
 });

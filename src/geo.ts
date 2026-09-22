@@ -104,3 +104,11 @@ export function legMeters(points: Fix[]): number {
 export function metersToMiles(m: number): number {
   return Math.round((m / METERS_PER_MILE) * 100) / 100;
 }
+
+// Did any of these fixes leave the anchor, or is this all parked jitter? Same
+// threshold trackPoints() counts by, so "moving" here means "miles are being
+// added". Used to push the still-parked nudge back while he's driving.
+export function anyMovement(anchor: Fix | null, fixes: Fix[]): boolean {
+  if (!anchor || !isUsable(anchor)) return false;
+  return fixes.some((f) => isUsable(f) && moved(anchor, f) && !tooFast(anchor, f));
+}

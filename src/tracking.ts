@@ -6,7 +6,8 @@ import {
   localDate, markInterrupted, openDay, openLeg, pointsForLeg, setAddress,
   type Day, type Leg,
 } from './db';
-import { haversineMeters, legMeters, metersToMiles, trackPoints, type Fix } from './geo';
+import { anyMovement, haversineMeters, legMeters, metersToMiles, trackPoints, type Fix } from './geo';
+import { bumpParkedNudge, cancelParkedNudge, hideControls, showControls } from './notify';
 
 export const TASK = 'mileage-tracking';
 
@@ -23,7 +24,12 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(TASK, async ({ 
   }
   const leg = openLeg();
   if (!leg || !data?.locations?.length) return;
-  insertPoints(leg.id, data.locations.map(toFix));
+  const fixes = data.locations.map(toFix);
+  const anchor = lastPoint(leg.id);
+  insertPoints(leg.id, fixes);
+  // Still driving, so push the still-parked nudge back. It only ever fires
+  // once the car has been sitting with a leg open.
+  if (anyMovement(anchor, fixes)) await bumpParkedNudge(Date.now());
 });
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -52,8 +58,11 @@ async function startUpdates() {
     distanceInterval: 10,
     pausesUpdatesAutomatically: false,
     foregroundService: {
-      notificationTitle: 'Mileage Log is tracking',
-      notificationBody: 'Tap Mark stop in the app when you park.',
+      // Android requires this one and expo-location can't put buttons on it,
+      // so it stays plain; the controls notification next to it has the
+      // Mark stop / End day buttons.
+      notificationTitle: 'Mileage Log',
+      notificationBody: 'Recording your route.',
       notificationColor: '#1b7f3b',
       killServiceOnDestroy: false,
     },
@@ -132,6 +141,7 @@ export async function startDay(): Promise<PermResult> {
     await stopUpdates();
     throw e;
   }
+  await cancelParkedNudge();
   return 'ok';
 }
 
@@ -174,6 +184,8 @@ export async function markStop(): Promise<number> {
     finishLeg(day, leg, fix, now);
     createLeg(day.id, leg.leg_no + 1, now, fix);
   });
+  // He parked and said so. The next leg re-arms the nudge once it moves.
+  await cancelParkedNudge();
   return leg.id;
 }
 
@@ -197,6 +209,8 @@ export async function endDay(opts: { atLastPoint?: boolean } = {}): Promise<numb
     closeDay(day.id, Date.now());
   }
   await stopUpdates();
+  await cancelParkedNudge();
+  await hideControls();
   return closedId;
 }
 
@@ -231,6 +245,8 @@ export async function getStatus(): Promise<Status> {
     day.interrupted = 1;
     leg.interrupted = 1;
   }
+  if (day && leg) await showControls(leg.leg_no, leg.start_time, tracking);
+  else await hideControls();
   return {
     day,
     leg,
