@@ -18,7 +18,7 @@ so in a sentence and build it as asked anyway.
 | 4 | CSV export/import, weekly export reminder | Done 2026-09-21, emulator-verified (export read back, wipe + restore, reminder fired) |
 | 5 | Post-field-test adds: Mark stop / End day notification buttons, battery-optimization warning, still-parked nudge, Canvassing purpose | Done 2026-09-22, emulator-verified |
 | 6 | Bug-fix cleanup, v1.1.0 (versionCode 2): stale-day guard, CSV dedupe, trim flag, stale last-known fix, map on weak signal | Done 2026-09-22, emulator-verified; branch `opus-5.5-cleanup` |
-| 7 | v1.2.0 (versionCode 3): one tracking notification with the buttons built in (was two), Android 16 Live Update request | Done 2026-09-23, emulator-verified on API 35 (upgrade from 1.1.0, warm and cold button taps, End day); Live Update and Samsung Now Bar untested |
+| 7 | v1.2.0 (versionCode 3): one tracking notification with the buttons built in (was two), Android 16 Live Update request | Done 2026-09-23, emulator-verified on API 35 (upgrade from 1.1.0, warm and cold button taps, End day). On his Samsung the buttons work but no Live Update shows; he said to leave it (2026-09-23) |
 
 Ideas he asked to keep (not built): `PLANS.md` (fuel cost from MPG + gas price).
 
