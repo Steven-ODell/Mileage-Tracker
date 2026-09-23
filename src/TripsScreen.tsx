@@ -3,10 +3,10 @@ import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { isDone, legsForYear, yearsWithLegs, type Leg } from './db';
 import LegRow from './LegRow';
 import { isBusiness } from './purposes';
-import { Btn, Chip, dayLabel, Header, makeUi, type Palette, useColors, useStyles } from './ui';
+import { Btn, Chip, dayLabel, Header, type Palette, useStyles } from './ui';
 
-const business = (legs: Leg[]) =>
-  legs.filter(isDone).filter((l) => isBusiness(l.purpose)).reduce((s, l) => s + (l.miles ?? 0), 0);
+const milesWhere = (legs: Leg[], business: boolean) =>
+  legs.filter(isDone).filter((l) => isBusiness(l.purpose) === business).reduce((s, l) => s + (l.miles ?? 0), 0);
 
 export default function TripsScreen(props: {
   onBack: () => void;
@@ -14,9 +14,7 @@ export default function TripsScreen(props: {
   onOpenDayMap: (dayId: number) => void;
   onAdd: () => void;
 }) {
-  const c = useColors();
   const styles = useStyles(makeStyles);
-  const ui = useStyles(makeUi);
   const thisYear = String(new Date().getFullYear());
   const years = useMemo(() => {
     const ys = yearsWithLegs();
@@ -31,13 +29,13 @@ export default function TripsScreen(props: {
     return [...byDate.entries()].map(([date, data]) => ({
       date,
       data,
-      miles: business(data),
+      miles: milesWhere(data, true),
       dayId: data.find((l) => l.day_id != null)?.day_id ?? null,
     }));
   }, [legs]);
 
-  const total = business(legs);
-  const personal = legs.filter((l) => !isBusiness(l.purpose)).reduce((s, l) => s + (l.miles ?? 0), 0);
+  const total = milesWhere(legs, true);
+  const personal = milesWhere(legs, false);
 
   return (
     <View style={styles.screen}>

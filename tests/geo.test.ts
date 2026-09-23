@@ -5,6 +5,7 @@ import {
   METERS_PER_MILE,
   MAX_ACCURACY_M,
   anyMovement,
+  findGap,
   haversineMeters,
   isUsable,
   legMeters,
@@ -208,4 +209,28 @@ test('anyMovement ignores a lone glitch and a leg that has no points yet', () =>
   assert.ok(!anyMovement(here, [far]), '20 km in 5 s is a glitch, not a drive');
   const junk: Fix = { ...offset(LAT0, LNG0, 300, 0), ts: 60_000, accuracy: MAX_ACCURACY_M + 10 };
   assert.ok(!anyMovement(here, [junk]), 'a low-accuracy fix should not count');
+});
+
+test('findGap: a 3 min hole while moving 1+ km is flagged with its window', () => {
+  const rand = rng(20);
+  const a = drive({ ts: 0, lat: LAT0, lng: LNG0 }, METERS_PER_MILE, 30, rand);
+  const endA = a[a.length - 1];
+  // Service killed for 3 minutes; the car kept going and reappears 1.5 km on.
+  const resume = { ts: endA.ts + 3 * 60_000, ...offset(endA.lat, endA.lng, 0, 1500) };
+  const b = drive(resume, METERS_PER_MILE, 30, rand);
+  const gap = findGap([...a, ...b]);
+  assert.ok(gap, 'expected a gap');
+  assert.ok(gap.from <= endA.ts && gap.from >= endA.ts - 10_000, `from ${gap.from}`);
+  assert.equal(gap.to, b[0].ts);
+});
+
+test('findGap: a red light (no points, no movement) and a normal drive are not gaps', () => {
+  const rand = rng(21);
+  const a = drive({ ts: 0, lat: LAT0, lng: LNG0 }, METERS_PER_MILE, 30, rand);
+  const endA = a[a.length - 1];
+  // distanceInterval means a stopped phone sends nothing: 4 silent minutes.
+  const b = drive({ ts: endA.ts + 4 * 60_000, lat: endA.lat, lng: endA.lng }, METERS_PER_MILE, 30, rand);
+  assert.equal(findGap(a), null);
+  assert.equal(findGap([...a, ...b]), null);
+  assert.equal(findGap([]), null);
 });

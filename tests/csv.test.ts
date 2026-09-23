@@ -97,3 +97,28 @@ test('parseDate and parseTime edge cases', () => {
   assert.equal(parseTime('13:00 PM'), null);
   assert.equal(parseTime('7:05:59'), 7 * 60 + 5);
 });
+
+test('dedupe key: every leg matches its own export, whatever its coordinates', () => {
+  // Rounding the phone's value straight to 4 dp and the file's 6-dp value to
+  // 4 dp disagree for a few coordinates in a thousand; those legs used to
+  // import twice. Fixed seed so the run is repeatable.
+  let s = 7;
+  const rand = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const src = Array.from({ length: 3000 }, (_, i) =>
+    leg({ leg_no: i + 1, from_lat: 33 + rand(), from_lng: -112 + rand(), to_lat: 33 + rand(), to_lng: -112 + rand() })
+  );
+  const back = csvToLegs(toCsv(src)).legs.map((l) => l.leg);
+  const mismatched = src.filter((l, i) => dedupeKey(l) !== dedupeKey(back[i]));
+  assert.equal(mismatched.length, 0);
+});
+
+test('dedupe key: a GPS leg matches an export taken before its address was looked up', () => {
+  const a = leg();
+  assert.equal(dedupeKey(a), dedupeKey({ ...a, from_address: null, to_address: null }));
+});
+
+test('dedupe key: hand-entered legs (no coords) are told apart by address', () => {
+  const manual = leg({ start_time: null, end_time: null, from_lat: null, from_lng: null, to_lat: null, to_lng: null });
+  assert.notEqual(dedupeKey(manual), dedupeKey({ ...manual, to_address: 'Home Depot, Mesa' }));
+  assert.equal(dedupeKey(manual), dedupeKey({ ...manual, to_address: '  748 east main street,  MESA, Arizona 85203' }));
+});

@@ -68,20 +68,34 @@ let showing: string | null = null;
 
 // The buttons expo-location's own foreground-service notification can't have.
 // Cheap to call repeatedly: it only reposts when the text would change.
-export async function showControls(legNo: number, startTime: number | null, tracking: boolean) {
-  const key = `${legNo}|${tracking}`;
+export async function showControls(
+  legNo: number,
+  startTime: number | null,
+  state: { tracking: boolean } | { staleDate: string }
+) {
+  const key = `${legNo}|${JSON.stringify(state)}`;
   if (showing === key) return;
   await prepare();
   const since = startTime
     ? new Date(startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     : null;
+  let title: string;
+  let body: string;
+  if ('staleDate' in state) {
+    title = `The day from ${state.staleDate} was never ended`;
+    body = 'Open the app to close it at the last GPS point.';
+  } else if (state.tracking) {
+    title = `Recording leg ${legNo}`;
+    body = `Started ${since ?? 'today'}. Tap Mark stop when you park.`;
+  } else {
+    title = `Leg ${legNo} · tracking stopped`;
+    body = 'Open the app to resume tracking or end the day.';
+  }
   await Notifications.scheduleNotificationAsync({
     identifier: CONTROLS_ID,
     content: {
-      title: tracking ? `Recording leg ${legNo}` : `Leg ${legNo} · tracking stopped`,
-      body: tracking
-        ? `Started ${since ?? 'today'}. Tap Mark stop when you park.`
-        : 'Open the app to resume tracking or end the day.',
+      title,
+      body,
       categoryIdentifier: ACTION_CATEGORY,
       sticky: true, // can't be swiped away mid-day
       autoDismiss: false,

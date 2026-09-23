@@ -1,12 +1,11 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Leg } from './db';
 import { isBusiness } from './purposes';
-import { makeUi, type Palette, place, timeRange, useColors, useStyles } from './ui';
+import { type Palette, place, timeRange, useColors, useStyles } from './ui';
 
 export default function LegRow({ leg, onPress }: { leg: Leg; onPress: () => void }) {
   const c = useColors();
   const styles = useStyles(makeStyles);
-  const ui = useStyles(makeUi);
   const personal = !isBusiness(leg.purpose);
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.leg, pressed && { backgroundColor: c.pressedBg }]}>

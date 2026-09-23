@@ -289,21 +289,23 @@ export function deleteLeg(id: number) {
 // End day was forgotten and the drive home got recorded. Non-destructive: the
 // points after the cut stay in the database, so resetting the trim restores
 // the original leg.
-export function trimLeg(id: number, cut: Fix, miles: number) {
+// interrupted: whether the part of the leg that still counts has a recording
+// gap (geo.findGap), so the flag follows the kept track either way.
+export function trimLeg(id: number, cut: Fix, miles: number, interrupted: boolean) {
   const leg = legById(id);
   if (!leg || leg.end_time == null) return;
   db().runSync(
     `UPDATE legs SET trim_end_ts = ?, orig_end_time = COALESCE(orig_end_time, end_time), end_time = ?,
-       to_lat = ?, to_lng = ?, to_address = NULL, miles = ?, interrupted = 0 WHERE id = ?`,
-    cut.ts, cut.ts, cut.lat, cut.lng, miles, id
+       to_lat = ?, to_lng = ?, to_address = NULL, miles = ?, interrupted = ? WHERE id = ?`,
+    cut.ts, cut.ts, cut.lat, cut.lng, miles, interrupted ? 1 : 0, id
   );
 }
 
-export function resetTrim(id: number, end: Fix, miles: number) {
+export function resetTrim(id: number, end: Fix, miles: number, interrupted: boolean) {
   db().runSync(
     `UPDATE legs SET trim_end_ts = NULL, end_time = COALESCE(orig_end_time, end_time), orig_end_time = NULL,
-       to_lat = ?, to_lng = ?, to_address = NULL, miles = ? WHERE id = ?`,
-    end.lat, end.lng, miles, id
+       to_lat = ?, to_lng = ?, to_address = NULL, miles = ?, interrupted = ? WHERE id = ?`,
+    end.lat, end.lng, miles, interrupted ? 1 : 0, id
   );
 }
 

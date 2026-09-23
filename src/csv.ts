@@ -232,11 +232,16 @@ export function csvToLegs(text: string): ParseResult {
 // exported form of the fields so a leg matches its own export after a round
 // trip. Purpose and note are left out: they're edited after the fact, and a
 // re-import must not duplicate a leg just because its note changed. Coords
-// are compared at 4 decimals (~11 m) to survive spreadsheet rounding.
+// are compared at 4 decimals (~11 m) to survive spreadsheet rounding, rounded
+// from the 6 the export writes so the phone's value and the file's agree.
+// Addresses only count for legs without coords (typed by hand): a GPS leg's
+// address is filled in after it's saved, so an export taken before that must
+// still match the leg.
 export function dedupeKey(l: CsvLeg): string {
   const r = legToRow(l);
-  const c = (v: number | null) => (v == null ? '' : v.toFixed(4));
+  const c = (v: number | null) => (v == null ? '' : Number(v.toFixed(6)).toFixed(4));
   const a = (v: string) => v.trim().toLowerCase().replace(/\s+/g, ' ');
-  return [r.date, r.start_time, r.end_time, r.miles, c(l.from_lat), c(l.from_lng), c(l.to_lat), c(l.to_lng),
-    a(r.from_address), a(r.to_address)].join('|');
+  const coords = [l.from_lat, l.from_lng, l.to_lat, l.to_lng];
+  const where = coords.some((v) => v != null) ? coords.map(c) : [a(r.from_address), a(r.to_address)];
+  return [r.date, r.start_time, r.end_time, r.miles, ...where].join('|');
 }

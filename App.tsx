@@ -6,7 +6,7 @@ import * as Notifications from 'expo-notifications';
 import { scheduleWeeklyReminder } from './src/backup';
 import BackupScreen from './src/BackupScreen';
 import DayMapScreen from './src/DayMapScreen';
-import { businessMiles, isDone, legById, legsForDate, legsForDay, localDate, type Leg } from './src/db';
+import { businessMiles, isDone, legById, legsForDate, legsForDay, localDate, openDay, type Leg } from './src/db';
 import EditLegScreen from './src/EditLegScreen';
 import LegRow from './src/LegRow';
 import LegScreen from './src/LegScreen';
@@ -14,11 +14,11 @@ import PurposeSheet from './src/PurposeSheet';
 import { ACTION_END_DAY, ACTION_MARK_STOP, claimAction } from './src/notify';
 import { askUnrestricted, isOptimized } from './src/power';
 import {
-  backfillAddresses, endDay, getStatus, markStop, resumeTracking, startDay,
+  backfillAddresses, endDay, getStatus, isStale, markStop, resumeTracking, startDay,
   type PermResult, type Status,
 } from './src/tracking';
 import TripsScreen from './src/TripsScreen';
-import { Btn, makeUi, type Palette, place, time, useColors, useStyles } from './src/ui';
+import { Btn, type Palette, place, time, useStyles } from './src/ui';
 
 type Route =
   | { name: 'trips' }
@@ -44,9 +44,7 @@ function permMessage(p: PermResult) {
 }
 
 export default function App() {
-  const c = useColors();
   const styles = useStyles(makeStyles);
-  const ui = useStyles(makeUi);
   // Home is always mounted underneath (its polling and state survive);
   // everything else is a simple stack on top of it.
   const [stack, setStack] = useState<Route[]>([]);
@@ -59,10 +57,13 @@ export default function App() {
     scheduleWeeklyReminder().catch((e) => console.warn('reminder', e));
   }, []);
 
-  // Tapping the weekly reminder opens Backup.
+  // Tapping the weekly reminder opens Backup. Claimed like the action buttons
+  // below, or every later launch would open Backup again.
   const tapped = Notifications.useLastNotificationResponse();
   useEffect(() => {
-    if (tapped?.notification.request.content.data?.open === 'backup') setStack([{ name: 'backup' }]);
+    if (tapped?.notification.request.content.data?.open !== 'backup') return;
+    if (!claimAction(`${tapped.notification.date}|backup`)) return;
+    setStack([{ name: 'backup' }]);
   }, [tapped]);
 
   useEffect(() => {
@@ -114,9 +115,7 @@ export default function App() {
 }
 
 function Home({ visible, push, goHome }: { visible: boolean; push: (r: Route) => void; goHome: () => void }) {
-  const c = useColors();
   const styles = useStyles(makeStyles);
-  const ui = useStyles(makeUi);
   const [status, setStatus] = useState<Status | null>(null);
   const [legs, setLegs] = useState<Leg[]>([]);
   const [todayMiles, setTodayMiles] = useState(0);
@@ -247,7 +246,11 @@ function Home({ visible, push, goHome }: { visible: boolean; push: (r: Route) =>
     // The launching response sticks around; only act on it the first time.
     if (!claimAction(`${action.notification.date}|${which}`)) return;
     goHome();
-    if (which === ACTION_MARK_STOP) onStop();
+    // Left open overnight: either button means "close it", and only at the
+    // last GPS point, or the drive home and the night end up in the leg.
+    const d = openDay();
+    if (d && isStale(d)) onEnd(true);
+    else if (which === ACTION_MARK_STOP) onStop();
     else onEnd(false);
   }, [action]);
 

@@ -6,7 +6,7 @@ import {
   localDate, markInterrupted, openDay, openLeg, pointsForLeg, setAddress,
   type Day, type Leg,
 } from './db';
-import { anyMovement, haversineMeters, legMeters, metersToMiles, trackPoints, type Fix } from './geo';
+import { anyMovement, findGap, legMeters, metersToMiles, type Fix } from './geo';
 import { bumpParkedNudge, cancelParkedNudge, hideControls, showControls } from './notify';
 
 export const TASK = 'mileage-tracking';
@@ -77,16 +77,21 @@ export async function isTracking(): Promise<boolean> {
   return Location.hasStartedLocationUpdatesAsync(TASK).catch(() => false);
 }
 
+// Android's last known position is only trusted if it's this fresh. An older
+// one can be last night's spot at home, and starting a leg there would count
+// the straight line from home to here as miles.
+const KNOWN_MAX_AGE_MS = 2 * 60 * 1000;
+
 // Where am I right now. A fresh fix is best; failing that the last point this
-// leg recorded; failing that whatever Android last knew.
+// leg recorded; failing that whatever Android last knew, if it's recent.
 async function currentFix(legId?: number): Promise<Fix> {
   try {
     return toFix(await withTimeout(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }), 20000));
   } catch {}
   const last = legId != null ? lastPoint(legId) : null;
   if (last) return { ...last, ts: Date.now() };
-  const known = await Location.getLastKnownPositionAsync().catch(() => null);
-  if (known) return toFix(known);
+  const known = await Location.getLastKnownPositionAsync({ maxAge: KNOWN_MAX_AGE_MS }).catch(() => null);
+  if (known && Date.now() - known.timestamp <= KNOWN_MAX_AGE_MS) return toFix(known);
   throw new Error('No GPS fix yet. Step outside or wait a few seconds and try again.');
 }
 
@@ -145,24 +150,6 @@ export async function startDay(): Promise<PermResult> {
   return 'ok';
 }
 
-// A hole in the recording where the car moved: 2+ minutes with no points and
-// 500+ m between the points either side. Sitting at a light produces no points
-// but doesn't move, so it never trips this. A killed service, a phone restart
-// or a long GPS dropout does, and the leg's miles across the hole are only a
-// straight-line guess. This is the reliable signal: when the app is reopened
-// after being killed, Android restarts tracking before we can notice it stopped.
-const GAP_MS = 2 * 60 * 1000;
-const GAP_M = 500;
-
-export function findGap(raw: Fix[]): { from: number; to: number } | null {
-  const pts = trackPoints(raw); // a lone glitch isn't a hole in the recording
-  for (let i = 1; i < pts.length; i++) {
-    const a = pts[i - 1], b = pts[i];
-    if (b.ts - a.ts > GAP_MS && haversineMeters(a, b) > GAP_M) return { from: a.ts, to: b.ts };
-  }
-  return null;
-}
-
 function finishLeg(day: Day, leg: Leg, to: Fix, now: number): number {
   insertPoints(leg.id, [to]);
   const pts = pointsForLeg(leg.id);
@@ -178,6 +165,9 @@ export async function markStop(): Promise<number> {
   const day = openDay();
   const leg = openLeg();
   if (!day || !leg) throw new Error('No day in progress.');
+  // A day left open overnight must be closed at its last GPS point. Marking a
+  // stop now would put the drive home and the night into this leg.
+  if (isStale(day)) throw new Error(`The day from ${day.date} was never ended. Close it at the last GPS point first.`);
   const fix = await currentFix(leg.id);
   const now = Date.now();
   db().withTransactionSync(() => {
@@ -221,6 +211,10 @@ export async function resumeTracking(): Promise<PermResult> {
   return 'ok';
 }
 
+export function isStale(day: Day): boolean {
+  return day.date !== localDate(Date.now());
+}
+
 export type Status = {
   day: Day | null;
   leg: Leg | null;
@@ -245,14 +239,15 @@ export async function getStatus(): Promise<Status> {
     day.interrupted = 1;
     leg.interrupted = 1;
   }
-  if (day && leg) await showControls(leg.leg_no, leg.start_time, tracking);
+  const stale = !!day && isStale(day);
+  if (day && leg) await showControls(leg.leg_no, leg.start_time, stale ? { staleDate: day.date } : { tracking });
   else await hideControls();
   return {
     day,
     leg,
     tracking,
     interrupted,
-    stale: !!day && day.date !== localDate(Date.now()),
+    stale,
     liveMiles: metersToMiles(legMeters(pts)),
     lastFixTs: pts.length ? pts[pts.length - 1].ts : null,
     gap,

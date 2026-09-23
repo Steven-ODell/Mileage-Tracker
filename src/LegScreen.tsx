@@ -1,19 +1,18 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
-import { deleteLeg, legById, pointsForLeg, resetTrim, trimLeg, type Leg } from './db';
-import { legMeters, metersToMiles, trackPoints, type Fix } from './geo';
+import { deleteLeg, isDone, legById, pointsForLeg, resetTrim, trimLeg, type Leg } from './db';
+import { findGap, legMeters, metersToMiles, trackPoints, type Fix } from './geo';
 import { buildPayload } from './mapData';
 import { isBusiness } from './purposes';
 import RouteMap from './RouteMap';
 import { backfillAddresses } from './tracking';
-import { Btn, dayLabel, Header, makeUi, type Palette, place, time, timeRange, useColors, useStyles } from './ui';
+import { Btn, dayLabel, Header, type Palette, place, time, timeRange, useColors, useStyles } from './ui';
 
 type Trim = { fixes: Fix[]; index: number };
 
 export default function LegScreen(props: { legId: number; onBack: () => void; onEdit: (id: number) => void }) {
   const c = useColors();
   const styles = useStyles(makeStyles);
-  const ui = useStyles(makeUi);
   const [leg, setLeg] = useState<Leg | null>(() => legById(props.legId));
   const [trim, setTrim] = useState<Trim | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,8 +37,8 @@ export default function LegScreen(props: { legId: number; onBack: () => void; on
 
   const startTrim = () => {
     const cutAt = leg.trim_end_ts;
-    const index = cutAt == null ? fixes.length - 1 : Math.max(0, fixes.findIndex((f) => f.ts >= cutAt));
-    setTrim({ fixes, index });
+    const at = cutAt == null ? -1 : fixes.findIndex((f) => f.ts >= cutAt);
+    setTrim({ fixes, index: at < 0 ? fixes.length - 1 : at });
   };
 
   const trimMiles = trim ? metersToMiles(legMeters(trim.fixes.slice(0, trim.index + 1))) : 0;
@@ -52,10 +51,11 @@ export default function LegScreen(props: { legId: number; onBack: () => void; on
       if (leg.trim_end_ts != null) {
         // Back to the original end: the last point recorded, which is where Mark stop / End day was tapped.
         const raw = pointsForLeg(leg.id);
-        resetTrim(leg.id, raw[raw.length - 1], untrimmedMiles);
+        resetTrim(leg.id, raw[raw.length - 1], untrimmedMiles, findGap(raw) != null);
       }
     } else {
-      trimLeg(leg.id, trim.fixes[trim.index], trimMiles);
+      const kept = trim.fixes.slice(0, trim.index + 1);
+      trimLeg(leg.id, trim.fixes[trim.index], trimMiles, findGap(kept) != null);
     }
     setTrim(null);
     reload();
@@ -105,11 +105,16 @@ export default function LegScreen(props: { legId: number; onBack: () => void; on
             </Text>
           )}
           {leg.interrupted ? <Text style={styles.flag}>Interrupted: check these miles</Text> : null}
-          <View style={styles.actions}>
-            <Btn small label="Edit" kind="outline" onPress={() => props.onEdit(leg.id)} style={styles.action} />
-            {canTrim && <Btn small label="Trim end" kind="outline" onPress={startTrim} style={styles.action} />}
-            <Btn small label="Delete" kind="danger" onPress={confirmDelete} style={styles.action} />
-          </View>
+          {isDone(leg) ? (
+            <View style={styles.actions}>
+              <Btn small label="Edit" kind="outline" onPress={() => props.onEdit(leg.id)} style={styles.action} />
+              {canTrim && <Btn small label="Trim end" kind="outline" onPress={startTrim} style={styles.action} />}
+              <Btn small label="Delete" kind="danger" onPress={confirmDelete} style={styles.action} />
+            </View>
+          ) : (
+            // Its miles are recomputed from GPS when it closes, so an edit now would be overwritten.
+            <Text style={styles.times}>Still recording. Edit it after Mark stop or End day.</Text>
+          )}
         </View>
       ) : (
         <View style={styles.info}>

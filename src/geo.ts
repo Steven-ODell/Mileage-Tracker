@@ -105,6 +105,24 @@ export function metersToMiles(m: number): number {
   return Math.round((m / METERS_PER_MILE) * 100) / 100;
 }
 
+// A hole in the recording where the car moved: 2+ minutes with no points and
+// 500+ m between the points either side. Sitting at a light produces no points
+// but doesn't move, so it never trips this. A killed service, a phone restart
+// or a long GPS dropout does, and the leg's miles across the hole are only a
+// straight-line guess. This is the reliable signal: when the app is reopened
+// after being killed, Android restarts tracking before we can notice it stopped.
+const GAP_MS = 2 * 60 * 1000;
+const GAP_M = 500;
+
+export function findGap(raw: Fix[]): { from: number; to: number } | null {
+  const pts = trackPoints(raw); // a lone glitch isn't a hole in the recording
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    if (b.ts - a.ts > GAP_MS && haversineMeters(a, b) > GAP_M) return { from: a.ts, to: b.ts };
+  }
+  return null;
+}
+
 // Did any of these fixes leave the anchor, or is this all parked jitter? Same
 // threshold trackPoints() counts by, so "moving" here means "miles are being
 // added". Used to push the still-parked nudge back while he's driving.

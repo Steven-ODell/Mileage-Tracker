@@ -47,7 +47,10 @@ function note(t) { var n = document.getElementById('note'); n.textContent = t; n
 function start(style) {
   ready = false;
   map = new maplibregl.Map({ container: 'map', style: style, attributionControl: { compact: true }, center: [-111.9, 33.45], zoom: 9 });
-  map.on('load', function () {
+  // style.load, not load: load also waits for the first tiles, and on a weak
+  // signal that can outlast the 10 s fallback below and throw away a street
+  // map that was about to draw. The route only needs the style.
+  map.once('style.load', function () {
     map.addSource('route', { type: 'geojson', data: empty() });
     map.addSource('dropped', { type: 'geojson', data: empty() });
     map.addSource('cut', { type: 'geojson', data: empty() });
@@ -80,7 +83,7 @@ function render(d) {
   map.getSource('dropped').setData({ type: 'FeatureCollection', features: drops });
   map.getSource('cut').setData({ type: 'FeatureCollection', features: cuts });
   markers.forEach(function (m) { m.remove(); });
-  markers = [];
+  markers = []; endMarker = null;
   d.pins.forEach(function (p) {
     var el = document.createElement('div');
     el.className = 'pin'; el.style.background = p.color; el.textContent = p.label;
@@ -148,8 +151,8 @@ window.stopTrim = function () {
   if (last) render(last);
 };
 
-// No signal means no basemap. Fall back to a blank background so the route
-// itself still draws.
+// No signal means no style, so no basemap. Fall back to a blank background so
+// the route itself still draws.
 start(STYLE_URL);
 setTimeout(function () {
   if (ready) return;
