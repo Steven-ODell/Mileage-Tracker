@@ -11,7 +11,7 @@ import EditLegScreen from './src/EditLegScreen';
 import LegRow from './src/LegRow';
 import LegScreen from './src/LegScreen';
 import PurposeSheet from './src/PurposeSheet';
-import { ACTION_END_DAY, ACTION_MARK_STOP, claimAction } from './src/notify';
+import { ACTION_END_DAY, ACTION_MARK_STOP, claimAction, parseActionUrl } from './src/notify';
 import { askUnrestricted, isOptimized } from './src/power';
 import {
   backfillAddresses, endDay, getStatus, isStale, markStop, resumeTracking, startDay,
@@ -27,11 +27,11 @@ type Route =
   | { name: 'dayMap'; dayId: number }
   | { name: 'backup' };
 
-// Show the weekly reminder even if it fires while the app is open. The
-// controls notification is ambient, so it goes to the shade without a banner.
+// Show the weekly reminder and the parked nudge even if they fire while the
+// app is open.
 Notifications.setNotificationHandler({
-  handleNotification: async (n) => ({
-    shouldShowBanner: n.request.content.data?.controls !== true,
+  handleNotification: async () => ({
+    shouldShowBanner: true,
     shouldShowList: true,
     shouldPlaySound: false,
     shouldSetBadge: false,
@@ -238,13 +238,8 @@ function Home({ visible, push, goHome }: { visible: boolean; push: (r: Route) =>
   // Mark stop / End day tapped on the tracking notification or the parked
   // nudge. Both open the app, so the purpose picker and the End day
   // confirmation work exactly as they do from the buttons on this screen.
-  const action = Notifications.useLastNotificationResponse();
-  useEffect(() => {
-    if (!action) return;
-    const which = action.actionIdentifier;
+  const onAction = (which: string) => {
     if (which !== ACTION_MARK_STOP && which !== ACTION_END_DAY) return;
-    // The launching response sticks around; only act on it the first time.
-    if (!claimAction(`${action.notification.date}|${which}`)) return;
     goHome();
     // Left open overnight: either button means "close it", and only at the
     // last GPS point, or the drive home and the night end up in the leg.
@@ -252,7 +247,36 @@ function Home({ visible, push, goHome }: { visible: boolean; push: (r: Route) =>
     if (d && isStale(d)) onEnd(true);
     else if (which === ACTION_MARK_STOP) onStop();
     else onEnd(false);
+  };
+
+  // The parked nudge's buttons come through expo-notifications. The launching
+  // response sticks around; only act on it the first time.
+  const action = Notifications.useLastNotificationResponse();
+  useEffect(() => {
+    if (!action) return;
+    const which = action.actionIdentifier;
+    if (which !== ACTION_MARK_STOP && which !== ACTION_END_DAY) return;
+    if (!claimAction(`${action.notification.date}|${which}`)) return;
+    onAction(which);
   }, [action]);
+
+  // The tracking notification's buttons open the app with a URL instead (it's
+  // posted natively, see src/notify.ts). The URL that launched the app is
+  // read again whenever the activity is recreated, so that one is claimed
+  // like the response above. A tap while the app is running is always acted
+  // on, even if it's the same button as before, e.g. a retry after "No GPS fix".
+  const [link, setLink] = useState<{ url: string; launch: boolean } | null>(null);
+  useEffect(() => {
+    Linking.getInitialURL().then((url) => url && setLink({ url, launch: true }));
+    const sub = Linking.addEventListener('url', ({ url }) => setLink({ url, launch: false }));
+    return () => sub.remove();
+  }, []);
+  useEffect(() => {
+    const which = parseActionUrl(link?.url ?? null);
+    if (!link || !which) return;
+    if (!claimAction(link.url) && link.launch) return;
+    onAction(which);
+  }, [link]);
 
   if (!status) return null;
 

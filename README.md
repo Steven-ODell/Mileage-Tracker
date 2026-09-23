@@ -12,8 +12,9 @@ cloud sync. The app is sideloaded as an APK and is not on the Play Store.
 ## Features
 
 - **Background tracking** that survives a whole workday with the screen off.
-  It runs as an Android foreground service and keeps a sticky notification
-  with Mark stop and End day buttons.
+  It runs as an Android foreground service, and that service's notification
+  carries the Mark stop and End day buttons (an Android 16 Live Update where
+  the phone supports it).
 - **Purpose picker** after every stop: Inspection, Canvassing, Adjuster
   meeting, Office, Supply run or Personal, plus an optional note. Personal
   legs don't count toward business miles.
@@ -111,6 +112,7 @@ without getting in a car. Run it with no arguments for usage.
 | `src/db.ts` | SQLite schema, migrations and queries |
 | `src/csv.ts` | CSV writing, parsing and duplicate detection (no imports) |
 | `src/notify.ts` | Tracking notification buttons and the parked nudge |
+| `modules/tracking-notification` | Local native module that puts the buttons on the tracking notification |
 | `src/backup.ts` | Export, import and the weekly reminder |
 | `map/map.html` | MapLibre map page, inlined into the app at build time |
 

@@ -1,7 +1,8 @@
 import * as Notifications from 'expo-notifications';
+import TrackingNotification from '../modules/tracking-notification';
 import { getSetting, setSetting } from './db';
 
-// Notifications that drive tracking: the controls notification that sits in
+// Notifications that drive tracking: the tracking notification that sits in
 // the shade all day with Mark stop / End day buttons, and the still-parked
 // nudge. No React in here: the background location task imports this file.
 
@@ -9,10 +10,12 @@ export const ACTION_CATEGORY = 'trackingControls'; // no ':' or '-' allowed
 export const ACTION_MARK_STOP = 'markStop';
 export const ACTION_END_DAY = 'endDay';
 
-const CONTROLS_ID = 'tracking-controls';
+// Where 1.1.0 posted the buttons, as a second notification next to the
+// tracking one. Dismissed once per process so an update doesn't leave it up.
+const OLD_CONTROLS_ID = 'tracking-controls';
 const NUDGE_ID = 'parked-nudge';
 const NUDGE_AT = 'nudge_at'; // settings key: when the pending nudge will fire
-const HANDLED = 'handled_action'; // settings key: the tap we already acted on
+const HANDLED = 'handled_action'; // settings key: taps already acted on, newest first
 
 const CH_CONTROLS = 'tracking';
 const CH_NUDGE = 'nudges';
@@ -54,6 +57,7 @@ export function prepare(): Promise<void> {
         { identifier: ACTION_MARK_STOP, buttonTitle: 'Mark stop', options: { opensAppToForeground: true } },
         { identifier: ACTION_END_DAY, buttonTitle: 'End day', options: { opensAppToForeground: true } },
       ]);
+      await Notifications.dismissNotificationAsync(OLD_CONTROLS_ID).catch(() => {});
     })().catch((e) => {
       setup = null; // let the next call try again
       throw e;
@@ -64,17 +68,15 @@ export function prepare(): Promise<void> {
 
 // ---------------------------------------------------------------- controls --
 
-let showing: string | null = null;
-
-// The buttons expo-location's own foreground-service notification can't have.
-// Cheap to call repeatedly: it only reposts when the text would change.
+// Replaces expo-location's plain tracking notification with one that has the
+// buttons (see modules/tracking-notification). Called on every GPS batch as
+// well as from the app, since expo-location puts its own back whenever the
+// service restarts. Cheap: the native side only reposts when something changed.
 export async function showControls(
   legNo: number,
   startTime: number | null,
   state: { tracking: boolean } | { staleDate: string }
 ) {
-  const key = `${legNo}|${JSON.stringify(state)}`;
-  if (showing === key) return;
   await prepare();
   const since = startTime
     ? new Date(startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
@@ -91,25 +93,31 @@ export async function showControls(
     title = `Leg ${legNo} · tracking stopped`;
     body = 'Open the app to resume tracking or end the day.';
   }
-  await Notifications.scheduleNotificationAsync({
-    identifier: CONTROLS_ID,
-    content: {
-      title,
-      body,
-      categoryIdentifier: ACTION_CATEGORY,
-      sticky: true, // can't be swiped away mid-day
-      autoDismiss: false,
-      color: '#1b7f3b',
-      data: { controls: true },
-    },
-    trigger: { channelId: CH_CONTROLS },
+  const recording = 'tracking' in state && state.tracking;
+  TrackingNotification.show({
+    title,
+    body,
+    channelId: CH_CONTROLS,
+    // Only a live recording counts as an ongoing activity for Android 16's
+    // Live Updates; the stopped and overnight states are plain notifications.
+    promote: recording,
+    chipText: recording ? `Leg ${legNo}` : null,
+    actions: [
+      { id: ACTION_MARK_STOP, title: 'Mark stop' },
+      { id: ACTION_END_DAY, title: 'End day' },
+    ],
   });
-  showing = key;
 }
 
 export async function hideControls() {
-  showing = null;
-  await Notifications.dismissNotificationAsync(CONTROLS_ID).catch(() => {});
+  TrackingNotification.hide();
+}
+
+// The buttons on the tracking notification open the app with this URL;
+// n is when that notification was posted.
+export function parseActionUrl(url: string | null): string | null {
+  const m = url?.match(/^mileagelog:\/\/action\/(\w+)\?/);
+  return m ? m[1] : null;
 }
 
 // ------------------------------------------------------------------- nudge --
@@ -145,9 +153,19 @@ export async function cancelParkedNudge() {
 
 // The response that launched the app stays the "last" response for as long as
 // the OS keeps it, so a Mark stop tapped at 10am would fire again every time
-// the app is opened afterwards. Acting on one claims it first.
+// the app is opened afterwards. Acting on one claims it first. Several kinds
+// get claimed (nudge buttons, tracking buttons, the weekly reminder), so it
+// remembers the last few rather than just one.
 export function claimAction(id: string): boolean {
-  if (getSetting(HANDLED) === id) return false;
-  setSetting(HANDLED, id);
+  const raw = getSetting(HANDLED);
+  let seen: string[] = [];
+  try {
+    seen = JSON.parse(raw ?? '[]');
+  } catch {
+    seen = [raw!]; // 1.1.0 stored a single plain id
+  }
+  if (!Array.isArray(seen)) seen = [];
+  if (seen.includes(id)) return false;
+  setSetting(HANDLED, JSON.stringify([id, ...seen].slice(0, 20)));
   return true;
 }

@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.sao.mileagelog'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.trackingnotification"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+}
+
+dependencies {
+  // NotificationCompat's Live Update calls (setRequestPromotedOngoing,
+  // setShortCriticalText) arrived in 1.17.
+  implementation "androidx.core:core:1.17.0"
+}

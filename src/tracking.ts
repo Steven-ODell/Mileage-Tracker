@@ -30,6 +30,11 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(TASK, async ({ 
   // Still driving, so push the still-parked nudge back. It only ever fires
   // once the car has been sitting with a leg open.
   if (anyMovement(anchor, fixes)) await bumpParkedNudge(Date.now());
+  // Puts the buttons back if the service restarted and reposted its plain
+  // notification. A no-op otherwise.
+  const day = openDay();
+  await showControls(leg.leg_no, leg.start_time, day && isStale(day) ? { staleDate: day.date } : { tracking: true })
+    .catch((e) => console.warn('controls', e));
 });
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -58,9 +63,9 @@ async function startUpdates() {
     distanceInterval: 10,
     pausesUpdatesAutomatically: false,
     foregroundService: {
-      // Android requires this one and expo-location can't put buttons on it,
-      // so it stays plain; the controls notification next to it has the
-      // Mark stop / End day buttons.
+      // Android requires this one and expo-location can't put buttons on it.
+      // It only shows until the first GPS batch, when showControls replaces
+      // it with the version that has the Mark stop / End day buttons.
       notificationTitle: 'Mileage Log',
       notificationBody: 'Recording your route.',
       notificationColor: '#1b7f3b',
