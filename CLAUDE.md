@@ -21,7 +21,7 @@ so in a sentence and build it as asked anyway.
 | 7 | v1.2.0 (versionCode 3): one tracking notification with the buttons built in (was two), Android 16 Live Update request | Done 2026-09-23, emulator-verified on API 35 (upgrade from 1.1.0, warm and cold button taps, End day). On his Samsung the buttons work but no Live Update shows; he said to leave it (2026-09-23) |
 | 8 | v1.3.0 (versionCode 4): Final walk preset, typed reason can stand in for a button | Done 2026-09-25 |
 
-Ideas he asked to keep (not built): `PLANS.md` (fuel cost from MPG + gas price).
+Ideas he asked to keep (not built): `PLANS.md` (fuel cost from MPG + gas price; iPhone version once enough coworkers need it).
 
 **He field-tested 2026-09-22 and reported nothing wrong.** The four spec
 milestones, his add-ons and the milestone 5 adds are all built. Of the
