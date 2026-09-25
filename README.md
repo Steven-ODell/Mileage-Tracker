@@ -15,9 +15,10 @@ cloud sync. The app is sideloaded as an APK and is not on the Play Store.
   It runs as an Android foreground service, and that service's notification
   carries the Mark stop and End day buttons (an Android 16 Live Update where
   the phone supports it).
-- **Purpose picker** after every stop: Inspection, Canvassing, Adjuster
-  meeting, Office, Supply run or Personal, plus an optional note. Personal
-  legs don't count toward business miles.
+- **Purpose picker** after every stop: Inspection, Final walk, Canvassing,
+  Adjuster meeting, Office, Supply run or Personal, plus an optional note. Or
+  skip the buttons and type the reason; the typed text becomes the purpose.
+  Personal legs don't count toward business miles.
 - **Trip list** grouped by day, with daily and year-to-date business miles.
 - **Edit, delete and manual entry** for drives you forgot to track.
 - **Trim end**: if you forgot End day and the drive home got recorded, drag a

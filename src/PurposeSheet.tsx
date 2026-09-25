@@ -1,20 +1,23 @@
 import { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { setPurpose, type Leg } from './db';
-import { PURPOSES } from './purposes';
+import { fromPicker, PURPOSES, toPicker } from './purposes';
 import { Btn, Chip, makeUi, type Palette, place, useColors, useStyles } from './ui';
 
 // Shown right after Mark stop / End day for the leg that just closed.
-// Common path: tap a purpose, tap Save.
+// Common path: tap a purpose, tap Save. Typing a reason with no button
+// picked saves the text as the purpose.
 export default function PurposeSheet({ leg, onDone }: { leg: Leg; onDone: () => void }) {
   const c = useColors();
   const styles = useStyles(makeStyles);
   const ui = useStyles(makeUi);
-  const [purpose, setP] = useState<string | null>(leg.purpose);
-  const [note, setNote] = useState(leg.note ?? '');
+  const start = toPicker(leg.purpose, leg.note);
+  const [purpose, setP] = useState<string | null>(start.chip);
+  const [note, setNote] = useState(start.text);
 
   const save = () => {
-    setPurpose(leg.id, purpose, note.trim() || null);
+    const v = fromPicker(purpose, note);
+    setPurpose(leg.id, v.purpose, v.note);
     onDone();
   };
 
@@ -32,19 +35,19 @@ export default function PurposeSheet({ leg, onDone }: { leg: Leg; onDone: () => 
           <Text style={ui.label}>Purpose</Text>
           <View style={styles.chips}>
             {PURPOSES.map((p) => (
-              <Chip key={p} label={p} selected={purpose === p} onPress={() => setP(p)} />
+              <Chip key={p} label={p} selected={purpose === p} onPress={() => setP(purpose === p ? null : p)} />
             ))}
           </View>
-          <Text style={ui.label}>Note (claim name or address)</Text>
+          <Text style={ui.label}>{purpose ? 'Note (claim name or address)' : 'Or type the reason'}</Text>
           <TextInput
             style={ui.input}
             value={note}
             onChangeText={setNote}
-            placeholder="Optional"
+            placeholder={purpose ? 'Optional' : 'e.g. Permit pickup, Smith claim'}
             placeholderTextColor={c.muted}
             returnKeyType="done"
           />
-          <Btn label="Save" onPress={save} disabled={!purpose} testID="purpose-save" />
+          <Btn label="Save" onPress={save} disabled={!purpose && !note.trim()} testID="purpose-save" />
           <Pressable onPress={onDone} style={styles.later}>
             <Text style={styles.laterText}>Later</Text>
           </Pressable>

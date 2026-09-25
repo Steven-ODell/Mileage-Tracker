@@ -19,6 +19,7 @@ so in a sentence and build it as asked anyway.
 | 5 | Post-field-test adds: Mark stop / End day notification buttons, battery-optimization warning, still-parked nudge, Canvassing purpose | Done 2026-09-22, emulator-verified |
 | 6 | Bug-fix cleanup, v1.1.0 (versionCode 2): stale-day guard, CSV dedupe, trim flag, stale last-known fix, map on weak signal | Done 2026-09-22, emulator-verified; branch `opus-5.5-cleanup` |
 | 7 | v1.2.0 (versionCode 3): one tracking notification with the buttons built in (was two), Android 16 Live Update request | Done 2026-09-23, emulator-verified on API 35 (upgrade from 1.1.0, warm and cold button taps, End day). On his Samsung the buttons work but no Live Update shows; he said to leave it (2026-09-23) |
+| 8 | v1.3.0 (versionCode 4): Final walk preset, typed reason can stand in for a button | Done 2026-09-25 |
 
 Ideas he asked to keep (not built): `PLANS.md` (fuel cost from MPG + gas price).
 
@@ -43,9 +44,14 @@ installs by downloading the APK; new builds must keep the same signing key.
 - Mark stop: tapped after parking. Ends the current leg, opens the purpose picker, next leg starts here.
 - End day: tapped after parking at the last stop. Closes the final leg (with picker), stops tracking. The drive home is never recorded.
 
-**Purpose picker**: preset buttons Inspection, Canvassing (his add, 2026-09-22),
+**Purpose picker**: preset buttons Inspection, Final walk (his add, 2026-09-25,
+after his promotion to project manager), Canvassing (his add, 2026-09-22),
 Adjuster meeting, Office, Supply run, Personal, plus an optional note (claim name or address). One tap + save
-is the common path. Purpose and note are editable later. Personal legs are not
+is the common path. Tapping a lit button unlights it. With no button lit, the
+text box is the reason: Save stores the typed text as the purpose and the note
+stays null (`toPicker`/`fromPicker` in `src/purposes.ts`, used by both the
+sheet and the edit screen), so the CSV purpose column is never blank for it.
+Typed purposes count as business. Purpose and note are editable later. Personal legs are not
 business miles.
 
 **Manual entry**: date, from, to, miles, purpose, note, for drives he forgot to track.

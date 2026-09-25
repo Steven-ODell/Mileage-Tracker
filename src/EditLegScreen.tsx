@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { insertManualLeg, legById, localDate, updateLeg, type LegEdit } from './db';
-import { PURPOSES } from './purposes';
+import { fromPicker, PURPOSES, toPicker } from './purposes';
 import { Btn, Chip, Header, makeUi, type Palette, useColors, useStyles } from './ui';
 
 function validDate(s: string) {
@@ -21,21 +21,23 @@ export default function EditLegScreen(props: { legId: number | null; onBack: () 
   const [from, setFrom] = useState(leg?.from_address ?? '');
   const [to, setTo] = useState(leg?.to_address ?? '');
   const [miles, setMiles] = useState(leg?.miles != null ? String(leg.miles) : '');
-  const [purpose, setPurpose] = useState<string | null>(leg?.purpose ?? null);
-  const [note, setNote] = useState(leg?.note ?? '');
+  const start = toPicker(leg?.purpose ?? null, leg?.note ?? null);
+  const [purpose, setPurpose] = useState<string | null>(start.chip);
+  const [note, setNote] = useState(start.text);
 
   const save = () => {
     const m = Number(miles.replace(',', '.'));
     if (!validDate(date)) return Alert.alert('Check the date', 'Use YYYY-MM-DD, for example 2026-09-21.');
     if (!miles.trim() || !Number.isFinite(m) || m < 0) return Alert.alert('Check the miles', 'Enter a number like 12.4.');
-    if (!purpose) return Alert.alert('Pick a purpose', 'Choose one of the purpose buttons.');
+    const v = fromPicker(purpose, note);
+    if (!v.purpose) return Alert.alert('Add a purpose', 'Pick one of the purpose buttons or type the reason.');
     const e: LegEdit = {
       date,
       from_address: from.trim() || null,
       to_address: to.trim() || null,
       miles: Math.round(m * 100) / 100,
-      purpose,
-      note: note.trim() || null,
+      purpose: v.purpose,
+      note: v.note,
     };
     if (leg) {
       updateLeg(leg.id, e);
@@ -67,11 +69,17 @@ export default function EditLegScreen(props: { legId: number | null; onBack: () 
         <Text style={ui.label}>Purpose</Text>
         <View style={styles.chips}>
           {PURPOSES.map((p) => (
-            <Chip key={p} label={p} selected={purpose === p} onPress={() => setPurpose(p)} />
+            <Chip key={p} label={p} selected={purpose === p} onPress={() => setPurpose(purpose === p ? null : p)} />
           ))}
         </View>
-        <Text style={ui.label}>Note (claim name or address)</Text>
-        <TextInput style={ui.input} value={note} onChangeText={setNote} placeholder="Optional" placeholderTextColor={c.muted} />
+        <Text style={ui.label}>{purpose ? 'Note (claim name or address)' : 'Or type the reason'}</Text>
+        <TextInput
+          style={ui.input}
+          value={note}
+          onChangeText={setNote}
+          placeholder={purpose ? 'Optional' : 'e.g. Permit pickup, Smith claim'}
+          placeholderTextColor={c.muted}
+        />
         <Btn label="Save" onPress={save} testID="edit-save" style={{ marginTop: 24 }} />
       </ScrollView>
     </KeyboardAvoidingView>
